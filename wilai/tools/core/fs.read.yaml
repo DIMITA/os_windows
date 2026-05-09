@@ -1,0 +1,33 @@
+name: fs.read
+version: 1
+description: Read a file from disk and return its contents as text.
+category: read
+risk: none
+
+inputs:
+  path:
+    type: string
+    pattern: path
+    required: true
+    description: Absolute or relative path to a regular file.
+  max_bytes:
+    type: integer
+    min: 1
+    max: 1048576
+    default: 65536
+    description: Truncate the response after this many bytes.
+
+executor:
+  type: builtin
+  fn: fs.read.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 1048576
+
+audit:
+  fields: [path, max_bytes]
+
+examples:
+  - args: { path: "/etc/hostname" }
+    note: "Inspect the host name."

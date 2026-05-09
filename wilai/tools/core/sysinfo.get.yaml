@@ -1,0 +1,22 @@
+name: sysinfo.get
+version: 1
+description: Return basic system information (uname, os-release, hostname).
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: builtin
+  fn: sysinfo.get.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 16384
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "Inspect the running system."

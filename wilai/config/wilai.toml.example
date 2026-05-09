@@ -1,0 +1,27 @@
+[general]
+default_provider  = "ollama"
+default_model     = "mistral:7b-instruct"
+confirm_timeout_s = 30
+
+[providers.ollama]
+type  = "ollama"
+url   = "http://127.0.0.1:11434"
+local = true
+
+[providers.claude]
+type        = "anthropic"
+api_key_env = "ANTHROPIC_API_KEY"
+local       = false
+
+[tools]
+extra_dirs = []
+disabled   = []
+
+[audit]
+chattr_append         = true
+include_output_sample = true
+max_size_mb           = 256
+
+[mode]
+auto_detect = true
+threshold   = 100

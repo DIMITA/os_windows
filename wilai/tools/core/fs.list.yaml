@@ -1,0 +1,27 @@
+name: fs.list
+version: 1
+description: List entries of a directory. Returns one line per entry prefixed by f/d/l.
+category: read
+risk: none
+
+inputs:
+  path:
+    type: string
+    pattern: path
+    default: "."
+    description: Directory to list. Defaults to current directory.
+
+executor:
+  type: builtin
+  fn: fs.list.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 262144
+
+audit:
+  fields: [path]
+
+examples:
+  - args: { path: "/etc" }
+    note: "List system configuration files."

@@ -1,0 +1,17 @@
+[package]
+name = "wilai-providers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Wilai LLM provider abstraction and implementations."
+
+[dependencies]
+wilai-core.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+async-trait.workspace = true
+tracing.workspace = true
