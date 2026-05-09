@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# wilos-snapshot-rollback NUM — replace the active root subvolume
+# with the contents of snapshot NUM. A safety snapshot of the current
+# state is taken first, named "before-rollback".
+set -euo pipefail
+
+NUM="${1:?usage: wilos-snapshot-rollback NUM}"
+SRC="/.snapshots/${NUM}/snapshot"
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Must be run as root (called via pkexec)."; exit 1
+fi
+[[ -d "$SRC" ]] || { echo "Snapshot $NUM not found at $SRC"; exit 1; }
+
+# Find the root device.
+ROOT_DEV="$(findmnt -no SOURCE /)"
+ROOT_DEV="${ROOT_DEV%%[*}"   # strip any subvol qualifier
+
+WORK="$(mktemp -d)"
+mount -o subvolid=5 "$ROOT_DEV" "$WORK"
+
+cd "$WORK"
+ts="$(date +%Y%m%d-%H%M%S)"
+
+# Safety snapshot of @ before swapping it out.
+btrfs subvolume snapshot @ "@.before-rollback.${ts}" >/dev/null
+
+# Move @ aside, then snapshot the chosen snapshot back into @.
+mv @ "@.replaced.${ts}"
+btrfs subvolume snapshot "${WORK}/.snapshots/${NUM}/snapshot" @ >/dev/null
+
+cd /
+umount "$WORK"
+rmdir "$WORK"
+
+snapper --no-dbus -c root create \
+    --type=single \
+    --description="rollback-to-${NUM}" \
+    --userdata="important=yes" >/dev/null || true
+
+echo "Rolled back to snapshot ${NUM}. Previous @ saved as @.replaced.${ts}."

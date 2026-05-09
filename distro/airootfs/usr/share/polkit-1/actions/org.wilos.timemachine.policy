@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+    <vendor>WilOS</vendor>
+    <vendor_url>https://wilos.example/</vendor_url>
+    <icon_name>wilos-timemachine</icon_name>
+
+    <action id="org.wilos.timemachine.rollback">
+        <description>Roll back to a Btrfs snapshot</description>
+        <message>Authentication is required to roll back the system to a snapshot.</message>
+        <defaults>
+            <allow_any>auth_admin_keep</allow_any>
+            <allow_inactive>auth_admin_keep</allow_inactive>
+            <allow_active>auth_admin_keep</allow_active>
+        </defaults>
+        <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/wilos-snapshot-rollback</annotate>
+    </action>
+
+    <action id="org.wilos.timemachine.snapper">
+        <description>Take a Btrfs snapshot</description>
+        <message>Authentication is required to take a snapshot.</message>
+        <defaults>
+            <allow_any>auth_admin_keep</allow_any>
+            <allow_inactive>auth_admin_keep</allow_inactive>
+            <allow_active>auth_admin_keep</allow_active>
+        </defaults>
+        <annotate key="org.freedesktop.policykit.exec.path">/usr/bin/snapper</annotate>
+    </action>
+</policyconfig>

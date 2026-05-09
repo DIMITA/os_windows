@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Settings. Aurora gear with subtle inner ring. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aS" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#B198FF"/>
+    </linearGradient>
+  </defs>
+  <!-- gear teeth: 8 rounded rects rotated -->
+  <g fill="url(#aS)">
+    <rect x="29" y="3"  width="6" height="12" rx="2"/>
+    <rect x="29" y="49" width="6" height="12" rx="2"/>
+    <rect x="3"  y="29" width="12" height="6" rx="2"/>
+    <rect x="49" y="29" width="12" height="6" rx="2"/>
+    <g transform="rotate(45 32 32)">
+      <rect x="29" y="3"  width="6" height="12" rx="2"/>
+      <rect x="29" y="49" width="6" height="12" rx="2"/>
+      <rect x="3"  y="29" width="12" height="6" rx="2"/>
+      <rect x="49" y="29" width="12" height="6" rx="2"/>
+    </g>
+  </g>
+  <!-- gear body -->
+  <circle cx="32" cy="32" r="18" fill="#1B1442"
+          stroke="url(#aS)" stroke-width="1.8"/>
+  <!-- inner ring -->
+  <circle cx="32" cy="32" r="9" fill="none"
+          stroke="url(#aS)" stroke-width="1.5" opacity="0.7"/>
+</svg>

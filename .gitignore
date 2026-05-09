@@ -6,3 +6,7 @@ work/
 *.elf
 *.bin
 .DS_Store
+
+# Rust
+wilbar/target/
+**/Cargo.lock

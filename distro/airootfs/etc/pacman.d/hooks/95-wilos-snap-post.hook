@@ -1,0 +1,11 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Taking a post-transaction WilOS snapshot
+When = PostTransaction
+Exec = /usr/bin/sh -c 'PRE=$(cat /var/lib/wilos/snapper-pre-num 2>/dev/null) && [ -n "$PRE" ] && /usr/bin/snapper --no-dbus -c root create --type=post --pre-number "$PRE" --description="pacman" --cleanup-algorithm=number; rm -f /var/lib/wilos/snapper-pre-num'

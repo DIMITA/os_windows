@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Installer. Disk + downward aurora arrow. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aI" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#B198FF"/>
+    </linearGradient>
+  </defs>
+  <!-- disk -->
+  <ellipse cx="32" cy="50" rx="22" ry="6"
+           fill="#1B1442" stroke="url(#aI)" stroke-width="1.8"/>
+  <path d="M10 50 v6 a22 6 0 0 0 44 0 v-6"
+        fill="#1B1442" stroke="url(#aI)" stroke-width="1.8"/>
+  <ellipse cx="32" cy="50" rx="14" ry="3.5"
+           fill="none" stroke="url(#aI)" stroke-width="1.2" opacity="0.6"/>
+  <!-- downward aurora arrow -->
+  <path d="M32 4 v28"
+        stroke="url(#aI)" stroke-width="4"
+        stroke-linecap="round"/>
+  <path d="M22 26 l10 10 l10 -10"
+        fill="none" stroke="url(#aI)" stroke-width="4"
+        stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

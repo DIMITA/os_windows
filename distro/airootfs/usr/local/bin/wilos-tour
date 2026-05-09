@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+"""
+wilos-tour — first-run welcome tour.
+
+A short Adw.Carousel walking the user through the desktop's main
+gestures (Spotlight, dock, workspaces, install). Idempotent: it
+self-marks completion so it does not pop up again on subsequent
+logins. Pass --force to reopen it.
+"""
+
+import gi, os, sys, subprocess
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gtk, Gio, Pango  # noqa: E402
+
+APP_ID = "org.wilos.Tour"
+LOGO   = "/usr/share/wilos-branding/wilos-logo-256.png"
+DONE   = os.path.expanduser("~/.config/wilos-tour-done")
+
+SLIDES = [
+    {
+        "icon":  LOGO,
+        "title": "Welcome to WilOS",
+        "body":  "Light, made personal. A quick tour so you feel at "
+                 "home in under a minute.",
+    },
+    {
+        "icon":  "system-search-symbolic",
+        "title": "Spotlight launcher",
+        "body":  "Press <b>Super + Space</b> from anywhere to open "
+                 "Launchpad. Type a few letters to find apps and "
+                 "actions, then hit Return.",
+    },
+    {
+        "icon":  "view-grid-symbolic",
+        "title": "The dock and the menu bar",
+        "body":  "The floating glass dock at the bottom holds your "
+                 "favourite apps. The bar at the top shows the active "
+                 "window, the time, and your status icons.",
+    },
+    {
+        "icon":  "view-paged-symbolic",
+        "title": "Workspaces and gestures",
+        "body":  "Three-finger swipe left or right on the trackpad to "
+                 "move between workspaces. Press <b>Super + 1..9</b> "
+                 "to jump to a specific one.",
+    },
+    {
+        "icon":  "utilities-terminal-symbolic",
+        "title": "Terminal and apps",
+        "body":  "Press <b>Super + Return</b> for a terminal. "
+                 "<b>Super + E</b> opens Files, <b>Super + B</b> "
+                 "your browser. Lots more under the launcher.",
+    },
+    {
+        "icon":  "drive-harddisk-symbolic",
+        "title": "Install WilOS to disk",
+        "body":  "If you are running from a USB stick, click the "
+                 "Installer in the dock when you are ready to put "
+                 "WilOS on this computer.",
+    },
+    {
+        "icon":  "object-select-symbolic",
+        "title": "All set",
+        "body":  "That is the tour. Have fun. You can reopen it any "
+                 "time from the launcher under \"Welcome Tour\".",
+    },
+]
+
+
+def make_slide(spec):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=24,
+                  halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
+                  margin_start=64, margin_end=64,
+                  margin_top=48, margin_bottom=48)
+
+    icon = spec["icon"]
+    if icon.startswith("/") and os.path.exists(icon):
+        img = Gtk.Image.new_from_file(icon)
+        img.set_pixel_size(160)
+    else:
+        img = Gtk.Image.new_from_icon_name(icon)
+        img.set_pixel_size(96)
+        img.add_css_class("accent")
+    box.append(img)
+
+    title = Gtk.Label(label=spec["title"])
+    title.add_css_class("title-1")
+    box.append(title)
+
+    body = Gtk.Label(use_markup=True, wrap=True,
+                     wrap_mode=Pango.WrapMode.WORD_CHAR,
+                     justify=Gtk.Justification.CENTER,
+                     max_width_chars=48)
+    body.set_label(spec["body"])
+    body.add_css_class("title-4")
+    body.add_css_class("dim-label")
+    box.append(body)
+
+    return box
+
+
+class TourApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.connect("command-line", self._on_cmdline)
+
+    def _on_cmdline(self, _app, cmdline):
+        args = cmdline.get_arguments()
+        if "--force" not in args and os.path.exists(DONE):
+            return 0
+        self.activate()
+        return 0
+
+    def do_activate(self):
+        win = Adw.ApplicationWindow(application=self,
+                                    title="Welcome to WilOS",
+                                    default_width=820,
+                                    default_height=560)
+
+        view   = Adw.ToolbarView()
+        win.set_content(view)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle.new("Welcome", ""))
+        view.add_top_bar(header)
+
+        carousel = Adw.Carousel()
+        carousel.set_allow_scroll_wheel(True)
+        carousel.set_spacing(0)
+        carousel.set_hexpand(True)
+        carousel.set_vexpand(True)
+        for s in SLIDES:
+            carousel.append(make_slide(s))
+        view.set_content(carousel)
+
+        # Page indicator + actions in the bottom bar.
+        bottom = Gtk.Box(spacing=12, margin_start=16, margin_end=16,
+                         margin_top=10, margin_bottom=10)
+        view.add_bottom_bar(bottom)
+
+        skip = Gtk.Button.new_with_label("Skip")
+        skip.add_css_class("flat")
+        skip.connect("clicked", lambda *_: self._finish(win))
+        bottom.append(skip)
+
+        dots = Adw.CarouselIndicatorDots()
+        dots.set_carousel(carousel)
+        dots.set_hexpand(True)
+        bottom.append(dots)
+
+        nxt = Gtk.Button.new_with_label("Next")
+        nxt.add_css_class("suggested-action")
+        nxt.add_css_class("pill")
+        bottom.append(nxt)
+
+        def on_page(_carousel, _idx):
+            i = int(carousel.get_position())
+            if i + 1 >= carousel.get_n_pages():
+                nxt.set_label("Done")
+            else:
+                nxt.set_label("Next")
+        carousel.connect("page-changed", on_page)
+
+        def on_next(_btn):
+            i = int(carousel.get_position())
+            if i + 1 >= carousel.get_n_pages():
+                self._finish(win)
+            else:
+                carousel.scroll_to(carousel.get_nth_page(i + 1), True)
+        nxt.connect("clicked", on_next)
+
+        win.present()
+
+    def _finish(self, win):
+        try:
+            os.makedirs(os.path.dirname(DONE), exist_ok=True)
+            open(DONE, "w").close()
+        except OSError:
+            pass
+        win.close()
+
+
+if __name__ == "__main__":
+    sys.exit(TourApp().run(sys.argv))

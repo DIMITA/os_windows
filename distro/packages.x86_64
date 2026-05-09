@@ -38,6 +38,8 @@ e2fsprogs
 ntfs-3g
 parted
 gptfdisk
+snapper
+snap-pac
 
 # Network
 networkmanager

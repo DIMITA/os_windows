@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""
+wilos-timemachine — Snapper snapshot browser and rollback UI.
+
+Lists every snapshot Snapper knows about for the `root` config,
+shows the description and date, and offers two actions:
+  • "Browse" mounts the snapshot read-only and opens it in Files.
+  • "Rollback" replaces the active @ subvolume with the snapshot,
+    after a typed confirmation.
+"""
+
+import gi, os, re, subprocess, sys, datetime
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, Gio, Gtk, Pango  # noqa: E402
+
+APP_ID = "org.wilos.TimeMachine"
+ROLLBACK_HELPER = "/usr/local/bin/wilos-snapshot-rollback"
+SNAPSHOT_BASE   = "/.snapshots"
+
+
+def snapper_list():
+    """Return a list of dicts {num, type, date, desc, user}.
+    Falls back to an empty list if snapper is unavailable."""
+    try:
+        raw = subprocess.check_output(
+            ["snapper", "--no-dbus", "-c", "root", "--csvout",
+             "list", "--columns", "number,type,date,description,userdata"],
+            text=True, stderr=subprocess.DEVNULL)
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return []
+
+    out = []
+    for ln in raw.splitlines()[1:]:
+        cols = next(csv_iter([ln]))
+        if not cols or cols[0].strip() in ("", "0"):
+            continue
+        out.append({
+            "num":   cols[0].strip(),
+            "type":  cols[1].strip(),
+            "date":  cols[2].strip(),
+            "desc":  cols[3].strip(),
+            "user":  cols[4].strip(),
+        })
+    return out
+
+
+def csv_iter(lines):
+    """Tiny CSV splitter that handles quoted fields."""
+    import csv
+    for row in csv.reader(lines):
+        yield row
+
+
+def humanize_date(s):
+    if not s:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        return s
+    delta = datetime.datetime.now(dt.tzinfo) - dt
+    if delta.days >= 1:
+        return dt.strftime("%a %d %b, %H:%M")
+    h, rem = divmod(int(delta.total_seconds()), 3600)
+    m, _ = divmod(rem, 60)
+    if h:
+        return f"{h}h {m}m ago"
+    if m:
+        return f"{m} min ago"
+    return "just now"
+
+
+class TimeMachineWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Time Machine",
+                         default_width=820, default_height=560)
+
+        view = Adw.ToolbarView()
+        self.set_content(view)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle.new("Time Machine",
+                                                     "Btrfs snapshots"))
+        view.add_top_bar(header)
+
+        refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic")
+        refresh.set_tooltip_text("Refresh")
+        refresh.connect("clicked", lambda *_: self._reload())
+        header.pack_end(refresh)
+
+        snap_now = Gtk.Button.new_with_label("Take snapshot")
+        snap_now.add_css_class("suggested-action")
+        snap_now.add_css_class("pill")
+        snap_now.connect("clicked", self._take_snapshot)
+        header.pack_end(snap_now)
+
+        # Body: list of snapshots in a frosted boxed-list.
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_hexpand(True)
+        scroller.set_vexpand(True)
+        view.set_content(scroller)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                        spacing=12, margin_top=24, margin_bottom=24,
+                        margin_start=24, margin_end=24)
+        scroller.set_child(outer)
+
+        self.banner = Adw.Banner()
+        self.banner.set_revealed(False)
+        outer.append(self.banner)
+
+        self.list = Gtk.ListBox()
+        self.list.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.list.add_css_class("boxed-list")
+        outer.append(self.list)
+
+        self._reload()
+
+    def _reload(self):
+        for c in list(self.list):
+            self.list.remove(c)
+
+        if not os.path.isdir(SNAPSHOT_BASE):
+            self.banner.set_title(
+                "Snapshots are not configured on this system. "
+                "Time Machine needs a Btrfs root with the @snapshots subvolume.")
+            self.banner.set_revealed(True)
+            return
+        self.banner.set_revealed(False)
+
+        snaps = snapper_list()
+        if not snaps:
+            row = Adw.ActionRow(title="No snapshots yet",
+                                subtitle="Take one with the button above.")
+            self.list.append(row)
+            return
+
+        for s in reversed(snaps):
+            self._add_row(s)
+
+    def _add_row(self, s):
+        row = Adw.ActionRow()
+        row.set_title(f"#{s['num']}  {s['desc'] or '(no description)'}")
+        sub = humanize_date(s["date"])
+        if s["type"]:
+            sub += f"  •  {s['type']}"
+        if "important=yes" in s["user"]:
+            sub += "  •  important"
+        row.set_subtitle(sub)
+
+        browse = Gtk.Button.new_with_label("Browse")
+        browse.add_css_class("flat")
+        browse.connect("clicked", lambda *_: self._browse(s["num"]))
+        row.add_suffix(browse)
+
+        rollback = Gtk.Button.new_with_label("Rollback")
+        rollback.add_css_class("destructive-action")
+        rollback.add_css_class("pill")
+        rollback.connect("clicked", lambda *_: self._rollback(s))
+        row.add_suffix(rollback)
+
+        self.list.append(row)
+
+    # ---- actions --------------------------------------------------- #
+
+    def _take_snapshot(self, _btn):
+        cmd = ["pkexec", "snapper", "--no-dbus", "-c", "root",
+               "create", "--type=single", "--description=manual"]
+        try:
+            subprocess.check_call(cmd)
+        except subprocess.CalledProcessError:
+            pass
+        self._reload()
+
+    def _browse(self, num):
+        path = os.path.join(SNAPSHOT_BASE, num, "snapshot")
+        if not os.path.isdir(path):
+            self._toast(f"Snapshot {num} is not mounted.")
+            return
+        # Open in Files (xdg-open will pick the configured handler).
+        subprocess.Popen(["xdg-open", path])
+
+    def _rollback(self, snap):
+        dlg = Adw.MessageDialog(transient_for=self,
+                                heading=f"Rollback to snapshot #{snap['num']}?",
+                                body=("This replaces the active root "
+                                      "subvolume with the contents of the "
+                                      "snapshot. A safety snapshot of the "
+                                      "current state is taken first. The "
+                                      "machine will reboot to apply it."))
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("rollback", "Rollback and reboot")
+        dlg.set_response_appearance("rollback",
+                                     Adw.ResponseAppearance.DESTRUCTIVE)
+        dlg.set_default_response("cancel")
+        dlg.connect("response", self._on_rollback_resp, snap)
+        dlg.present()
+
+    def _on_rollback_resp(self, dlg, response, snap):
+        dlg.close()
+        if response != "rollback":
+            return
+        cmd = ["pkexec", ROLLBACK_HELPER, snap["num"]]
+        try:
+            subprocess.check_call(cmd)
+            subprocess.Popen(["systemctl", "reboot"])
+        except subprocess.CalledProcessError:
+            self._toast("Rollback failed. Check journalctl for details.")
+
+    def _toast(self, message):
+        # Minimal in-app feedback via the banner.
+        self.banner.set_title(message)
+        self.banner.set_revealed(True)
+
+
+class TimeMachineApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_activate(self):
+        TimeMachineWindow(self).present()
+
+
+if __name__ == "__main__":
+    sys.exit(TimeMachineApp().run(sys.argv))

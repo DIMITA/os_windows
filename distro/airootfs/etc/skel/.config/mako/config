@@ -15,9 +15,13 @@ text-color=#ECEEF6
 border-color=#FFFFFF1A
 progress-color=over #7CC8FF66
 
+on-notify=exec paplay --volume=24576 /usr/share/sounds/wilos/notification.oga
+
 [urgency=high]
 border-color=#FF8A8A
 default-timeout=0
+on-notify=exec paplay --volume=32768 /usr/share/sounds/wilos/error.oga
 
 [urgency=low]
 text-color=#ECEEF699
+on-notify=none

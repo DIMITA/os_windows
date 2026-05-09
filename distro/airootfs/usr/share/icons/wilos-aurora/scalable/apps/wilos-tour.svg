@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Tour. Compass-like arrow on glass disc. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aTo" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+  </defs>
+  <circle cx="32" cy="32" r="26"
+          fill="#1B1442" stroke="url(#aTo)" stroke-width="1.8"/>
+  <!-- compass needle -->
+  <polygon points="32,10 38,32 32,28 26,32" fill="url(#aTo)"/>
+  <polygon points="32,54 38,32 32,36 26,32" fill="#FFFFFF" opacity="0.35"/>
+  <circle cx="32" cy="32" r="2.5" fill="#FFFFFF"/>
+</svg>

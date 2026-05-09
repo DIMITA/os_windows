@@ -13,10 +13,11 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("Adw", "1")
 from gi.repository import Adw, GLib, GObject, Gtk, Gio, Pango  # noqa: E402
 
-APP_ID  = "org.wilos.Installer"
-TITLE   = "Install WilOS"
-LOGO    = "/usr/share/wilos-branding/wilos-logo-256.png"
-INSTALL = "/usr/local/bin/wilos-install"
+APP_ID    = "org.wilos.Installer"
+TITLE     = "Install WilOS"
+LOGO      = "/usr/share/wilos-branding/wilos-logo-256.png"
+INSTALL   = "/usr/local/bin/wilos-install"
+AVATAR_DIR = "/usr/share/wilos-branding/avatars"
 
 
 # ---- helpers --------------------------------------------------------- #
@@ -201,6 +202,77 @@ class UserPage(Gtk.Box):
         return False
 
 
+class AvatarPage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=12, margin_top=24, margin_bottom=12,
+                         margin_start=48, margin_end=48)
+        self.append(_heading("Choose an avatar",
+                             "It will represent your account on the lock "
+                             "screen and in the user menu."))
+
+        self.selected = None
+        flow = Gtk.FlowBox()
+        flow.set_max_children_per_line(6)
+        flow.set_min_children_per_line(3)
+        flow.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        flow.set_homogeneous(True)
+        flow.set_column_spacing(16)
+        flow.set_row_spacing(16)
+        flow.set_margin_top(8)
+        self.append(flow)
+        self.flow = flow
+
+        if os.path.isdir(AVATAR_DIR):
+            avatars = sorted(f for f in os.listdir(AVATAR_DIR)
+                             if f.endswith(".png"))
+        else:
+            avatars = []
+        for fname in avatars:
+            path = os.path.join(AVATAR_DIR, fname)
+            child = Gtk.FlowBoxChild()
+            btn = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                          halign=Gtk.Align.CENTER)
+            img = Gtk.Image.new_from_file(path)
+            img.set_pixel_size(96)
+            img.add_css_class("card")
+            btn.append(img)
+            lbl = Gtk.Label(label=os.path.splitext(fname)[0].title())
+            lbl.add_css_class("caption")
+            btn.append(lbl)
+            child.set_child(btn)
+            child._path = path
+            flow.append(child)
+        flow.connect("child-activated", self._on_pick)
+        flow.connect("selected-children-changed", self._on_pick_any)
+
+        # "No avatar" option as the last entry.
+        none_child = Gtk.FlowBoxChild()
+        nb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4,
+                     halign=Gtk.Align.CENTER)
+        nimg = Gtk.Image.new_from_icon_name("avatar-default-symbolic")
+        nimg.set_pixel_size(96)
+        nimg.add_css_class("dim-label")
+        nb.append(nimg)
+        nb.append(Gtk.Label(label="None"))
+        none_child.set_child(nb)
+        none_child._path = ""
+        flow.append(none_child)
+
+        # Default selection: first avatar.
+        if avatars:
+            first = flow.get_child_at_index(0)
+            flow.select_child(first)
+            self.selected = first._path
+
+    def _on_pick(self, _flow, child):
+        self.selected = getattr(child, "_path", None)
+
+    def _on_pick_any(self, flow):
+        sel = flow.get_selected_children()
+        self.selected = sel[0]._path if sel else None
+
+
 class LocalePage(Gtk.Box):
     def __init__(self):
         super().__init__(orientation=Gtk.Orientation.VERTICAL,
@@ -382,6 +454,7 @@ class InstallerApp(Adw.Application):
         self.welcome  = WelcomePage()
         self.disk_pg  = DiskPage()
         self.user_pg  = UserPage()
+        self.avatar   = AvatarPage()
         self.locale   = LocalePage()
         self.confirm  = ConfirmPage()
         self.progress = ProgressPage()
@@ -390,6 +463,7 @@ class InstallerApp(Adw.Application):
         for name, w in [("welcome", self.welcome),
                         ("disk", self.disk_pg),
                         ("user", self.user_pg),
+                        ("avatar", self.avatar),
                         ("locale", self.locale),
                         ("confirm", self.confirm),
                         ("progress", self.progress),
@@ -414,8 +488,8 @@ class InstallerApp(Adw.Application):
         self.disk_pg.connect("selection-changed", self._on_disk_selected)
 
         self._step = 0
-        self._steps = ["welcome", "disk", "user", "locale", "confirm",
-                       "progress", "done"]
+        self._steps = ["welcome", "disk", "user", "avatar", "locale",
+                       "confirm", "progress", "done"]
         self._refresh_buttons()
         self.win.present()
 
@@ -473,6 +547,7 @@ class InstallerApp(Adw.Application):
         locale = self.locale.locale.get_selected_item().get_string()
         tz     = self.locale.tz.get_selected_item().get_string()
 
+        avatar_path = self.avatar.selected or ""
         cfg = tempfile.NamedTemporaryFile("w", delete=False, suffix=".cfg")
         cfg.write(
             f"DISK={self.disk}\n"
@@ -481,6 +556,7 @@ class InstallerApp(Adw.Application):
             f"PASSWORD={pw!r}\n"
             f"LOCALE={locale!r}\n"
             f"TZ={tz!r}\n"
+            f"AVATAR={avatar_path!r}\n"
             f"ASSUME_YES=1\n"
         )
         cfg.close()

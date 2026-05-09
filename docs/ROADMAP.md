@@ -40,18 +40,37 @@ we add **on top of** Arch + Linux, not about reinventing kernels.
 - [x] PolicyKit policy that lets the GUI elevate via pkexec
 - [x] Desktop entry + dock button for the installer
 
-## v0.3 — Polish round 2
+## v0.3 — Polish round 2 (this commit)
 
-- [ ] Custom icon set (rounded outline, two-tone) — replace
-      Papirus-Dark progressively
-- [ ] Custom cursor pack
-- [ ] System sound design (notification, login chime)
-- [ ] User account avatar selection during install
-- [ ] Snapper-based time-machine snapshots from `@snapshots`
-- [ ] First-party app skin pass on Nautilus, Settings, Calculator,
-      Photos
-- [ ] Live system: `firstrun` is a small Adw "tour" rather than a
-      single notification
+- [x] First-party Aurora icon set (`wilos-aurora`) overlaying
+      Papirus-Dark with custom Files / Terminal / Browser / Settings
+      / Installer / Tour / Time Machine glyphs and an `index.theme`
+- [x] First-run welcome tour (`wilos-tour`) — Adw.Carousel with 7
+      slides covering Spotlight, dock, workspaces, terminal, install
+- [x] User account avatar selection during install — 6 preset
+      glyphs + "None", written to AccountsService for the lock screen
+- [x] System sound design — notification ding + login arpeggio +
+      logout arpeggio + error tone, synthesised by `make-sounds.sh`
+      (sox + oggenc), wired into mako and the firstrun login chime
+- [x] Snapper config (`/`), pre/post pacman hooks, timeline +
+      cleanup timers enabled by the installer
+- [x] `wilos-timemachine` — GTK4 + libadwaita snapshot browser with
+      one-click rollback (typed-confirmation modal, safety snapshot
+      taken first), exposed in the dock with a custom icon
+- [x] `wilbar` — Rust + GTK4 + gtk4-layer-shell scaffold for the
+      future native top bar (clock-only v0; Waybar still ships)
+
+## v0.4 — Compositor split + ecosystem
+
+- [ ] Wilbar reaches parity with Waybar: workspaces (Hyprland IPC),
+      taskbar (foreign-toplevel-management), tray
+      (StatusNotifierItem), audio, network, brightness, battery
+- [ ] **Wildock**: native Rust dock with magnification animation
+- [ ] **Wilcenter**: KRunner-style command palette (calc, units,
+      web search, file open, clipboard history)
+- [ ] Polished window snap layouts (FancyZones-equivalent)
+- [ ] Workspace overview gesture (3-finger swipe up)
+- [ ] First-party Mail, Calendar, Notes, Camera apps (libadwaita)
 
 ## v0.3 — Productivity layer
 

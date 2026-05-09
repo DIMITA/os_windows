@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Time Machine
+GenericName=Snapshot browser
+Comment=Browse and roll back WilOS Btrfs snapshots
+Exec=wilos-timemachine
+Icon=wilos-timemachine
+Terminal=false
+Categories=System;Utility;
+Keywords=snapshot;backup;restore;rollback;
+StartupNotify=true
+StartupWMClass=org.wilos.TimeMachine

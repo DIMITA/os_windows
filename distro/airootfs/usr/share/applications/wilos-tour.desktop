@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Welcome Tour
+GenericName=WilOS welcome tour
+Comment=A short tour of the WilOS desktop
+Exec=wilos-tour --force
+Icon=wilos-tour
+Terminal=false
+Categories=GNOME;GTK;Documentation;
+Keywords=welcome;tour;help;onboarding;
+StartupNotify=true
+StartupWMClass=org.wilos.Tour

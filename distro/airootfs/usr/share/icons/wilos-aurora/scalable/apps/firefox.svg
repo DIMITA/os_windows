@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Browser. Globe with aurora orbital ribbon. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aB" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="50%" stop-color="#B198FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+    <radialGradient id="dB" cx="50%" cy="40%" r="60%">
+      <stop offset="0%"  stop-color="#1B1442"/>
+      <stop offset="100%" stop-color="#06030C"/>
+    </radialGradient>
+  </defs>
+  <circle cx="32" cy="32" r="24" fill="url(#dB)"
+          stroke="url(#aB)" stroke-width="1.8"/>
+  <!-- equator -->
+  <ellipse cx="32" cy="32" rx="24" ry="9"
+           fill="none" stroke="url(#aB)" stroke-width="1.4" opacity="0.6"/>
+  <!-- meridians -->
+  <ellipse cx="32" cy="32" rx="9"  ry="24"
+           fill="none" stroke="url(#aB)" stroke-width="1.4" opacity="0.6"/>
+  <!-- aurora orbital ribbon -->
+  <path d="M10 40 Q32 12 56 28"
+        fill="none" stroke="url(#aB)" stroke-width="3"
+        stroke-linecap="round" opacity="0.95"/>
+</svg>

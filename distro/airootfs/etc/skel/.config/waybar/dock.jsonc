@@ -14,7 +14,8 @@
     "modules-center": [
         "custom/finder", "custom/launcher", "custom/browser",
         "custom/mail",   "custom/messages", "custom/music",
-        "custom/photos", "custom/installer", "custom/terminal", "custom/sep",
+        "custom/photos", "custom/timemachine", "custom/installer",
+        "custom/terminal", "custom/sep",
         "custom/files",  "custom/trash"
     ],
     "modules-right":  [],
@@ -35,7 +36,8 @@
     "custom/messages": { "format": "", "tooltip": "Messages",  "on-click": "true" },
     "custom/music":    { "format": "", "tooltip": "Music",     "on-click": "mpv" },
     "custom/photos":   { "format": "", "tooltip": "Photos",    "on-click": "loupe" },
-    "custom/installer": { "format": "", "tooltip": "Install WilOS", "on-click": "wilos-installer" },
+    "custom/timemachine": { "format": "", "tooltip": "Time Machine", "on-click": "wilos-timemachine" },
+    "custom/installer":   { "format": "", "tooltip": "Install WilOS", "on-click": "wilos-installer" },
     "custom/terminal": { "format": "", "tooltip": "Terminal",  "on-click": "kitty" },
     "custom/sep":      { "format": "│", "tooltip": "" },
     "custom/files":    { "format": "", "tooltip": "Downloads", "on-click": "nautilus ~/Downloads" },

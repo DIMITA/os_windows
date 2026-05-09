@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Files. Folder with aurora gradient highlight. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aF" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="60%" stop-color="#B198FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+    <linearGradient id="bF" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#FFFFFF" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+  <!-- back fold -->
+  <path d="M8 18 h18 l4 4 h26 a4 4 0 0 1 4 4 v6 H8 V22 a4 4 0 0 1 4 -4 z"
+        fill="#1B1442" stroke="url(#aF)" stroke-width="1.5"/>
+  <!-- front body -->
+  <path d="M6 28 h52 a4 4 0 0 1 4 4 l-3 18 a6 6 0 0 1 -6 5 H11 a6 6 0 0 1 -6 -5 L2 32 a4 4 0 0 1 4 -4 z"
+        fill="url(#aF)" opacity="0.18"/>
+  <path d="M6 28 h52 a4 4 0 0 1 4 4 l-3 18 a6 6 0 0 1 -6 5 H11 a6 6 0 0 1 -6 -5 L2 32 a4 4 0 0 1 4 -4 z"
+        fill="none" stroke="url(#aF)" stroke-width="1.8"/>
+  <!-- highlight -->
+  <path d="M6 28 h52 v6 H6 z" fill="url(#bF)"/>
+</svg>

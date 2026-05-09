@@ -1,0 +1,12 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Taking a pre-transaction WilOS snapshot
+When = PreTransaction
+Exec = /usr/bin/sh -c '/usr/bin/snapper --no-dbus -c root create --type=pre --print-number --description="pacman" --userdata="important=$([ -e /etc/wilos/important-tx ] && echo yes || echo no)" > /var/lib/wilos/snapper-pre-num'
+AbortOnFail

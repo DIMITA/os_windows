@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Terminal. Glass window + aurora prompt + cursor. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aT" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#B198FF"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="10" width="52" height="44" rx="10"
+        fill="#1B1442" stroke="url(#aT)" stroke-width="1.8"/>
+  <!-- traffic lights -->
+  <circle cx="14" cy="20" r="2.4" fill="#FF8A8A"/>
+  <circle cx="22" cy="20" r="2.4" fill="#FFD580"/>
+  <circle cx="30" cy="20" r="2.4" fill="#9BE3C0"/>
+  <!-- prompt arrow -->
+  <path d="M14 36 l8 6 l-8 6"
+        fill="none" stroke="url(#aT)" stroke-width="2.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- cursor block -->
+  <rect x="28" y="40" width="12" height="6" rx="1.5" fill="url(#aT)" opacity="0.85"/>
+</svg>

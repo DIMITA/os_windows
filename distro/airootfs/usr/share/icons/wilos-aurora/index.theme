@@ -1,0 +1,42 @@
+[Icon Theme]
+Name=WilOS Aurora
+Comment=Aurora-style icon overlay for WilOS — falls back to Papirus-Dark
+Inherits=Papirus-Dark,Adwaita,hicolor
+Example=wilos
+Directories=scalable/apps,scalable/places,scalable/actions,scalable/devices,scalable/categories
+
+[scalable/apps]
+Size=64
+Scale=1
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Applications
+
+[scalable/places]
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Places
+
+[scalable/actions]
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Actions
+
+[scalable/devices]
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Devices
+
+[scalable/categories]
+Size=64
+MinSize=16
+MaxSize=512
+Type=Scalable
+Context=Categories

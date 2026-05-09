@@ -91,5 +91,14 @@ sits in the shell, the design system, and the install experience.
 | GTK3 fallback theme              | `distro/airootfs/etc/skel/.config/gtk-3.0/`                |
 | WilOS logo / branding            | `distro/airootfs/usr/share/wilos-branding/`                |
 | Graphical installer (GTK4)       | `distro/airootfs/usr/local/bin/wilos-installer`            |
+| Welcome tour                     | `distro/airootfs/usr/local/bin/wilos-tour`                 |
+| Time Machine snapshot UI         | `distro/airootfs/usr/local/bin/wilos-timemachine`          |
+| Snapshot rollback helper         | `distro/airootfs/usr/local/bin/wilos-snapshot-rollback`    |
+| Custom Aurora icon set           | `distro/airootfs/usr/share/icons/wilos-aurora/`            |
+| Avatar variants                  | `distro/airootfs/usr/share/wilos-branding/avatars/`        |
+| System sounds                    | `distro/airootfs/usr/share/sounds/wilos/`                  |
+| Snapper root config              | `distro/airootfs/etc/snapper/configs/root`                 |
+| Snapper pacman hooks             | `distro/airootfs/etc/pacman.d/hooks/*.hook`                |
 | PolicyKit policy for installer   | `distro/airootfs/usr/share/polkit-1/actions/`              |
 | Installer desktop entry          | `distro/airootfs/usr/share/applications/`                  |
+| Wilbar (native top bar, Rust)    | `wilbar/` (Cargo crate)                                    |

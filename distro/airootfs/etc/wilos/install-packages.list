@@ -11,6 +11,8 @@ python-gobject
 gtk4
 libadwaita
 btrfs-progs
+snapper
+snap-pac
 networkmanager
 sudo
 zsh

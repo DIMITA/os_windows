@@ -12,7 +12,7 @@ apply_gsettings() {
     local I="org.gnome.desktop.interface"
     gsettings set "$I" color-scheme           prefer-dark
     gsettings set "$I" gtk-theme              Adwaita-dark
-    gsettings set "$I" icon-theme             Papirus-Dark
+    gsettings set "$I" icon-theme             wilos-aurora
     gsettings set "$I" cursor-theme           Adwaita
     gsettings set "$I" cursor-size            24
     gsettings set "$I" font-name              "Inter 11"
@@ -29,15 +29,22 @@ apply_gsettings() {
 
 apply_gsettings
 
-# Welcome notification once the desktop is up.
+# Wait for the compositor to settle, then launch the tour.
 for _ in $(seq 1 20); do
-    pgrep -x mako >/dev/null && break
+    pgrep -x Hyprland >/dev/null && break
     sleep 0.5
 done
 
-if command -v notify-send >/dev/null; then
+if command -v wilos-tour >/dev/null; then
+    wilos-tour &
+elif command -v notify-send >/dev/null; then
     notify-send -i wilos -u normal "Welcome to WilOS Aurora" \
-        "Press Super + Space to launch apps. Press Super + Return for a terminal. To install WilOS to disk, open the Installer from the dock."
+        "Press Super + Space to launch apps."
+fi
+
+# Login chime — soft Aurora arpeggio.
+if [[ -r /usr/share/sounds/wilos/login.oga ]] && command -v paplay >/dev/null; then
+    paplay --volume=32768 /usr/share/sounds/wilos/login.oga 2>/dev/null &
 fi
 
 mkdir -p "$(dirname "$mark")"
