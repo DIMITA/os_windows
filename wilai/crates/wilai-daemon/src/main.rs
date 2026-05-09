@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use std::sync::Arc;
 use tracing_subscriber::EnvFilter;
+use wilai_daemon::detect::{spawn as spawn_detect, DetectConfig};
+use wilai_daemon::mode_mgr::ModeManager;
 use wilai_daemon::service::{collect_tool_dirs, default_socket_path, open_audit, Service, SocketServer};
 
 #[derive(Parser)]
@@ -10,6 +12,9 @@ struct Cli {
     /// Override the socket path. Defaults to $XDG_RUNTIME_DIR/wilai.sock.
     #[arg(long)]
     socket: Option<std::path::PathBuf>,
+    /// Disable pentest auto-detection regardless of config.
+    #[arg(long)]
+    no_auto_detect: bool,
     /// Logging filter (e.g. info, debug).
     #[arg(long, default_value = "info")]
     log: String,
@@ -34,10 +39,25 @@ async fn main() -> Result<()> {
     tracing::info!(dir = %audit_dir.display(), "audit ready");
     let (audit_tx, audit_handle) = audit.spawn_task();
 
+    let mode = ModeManager::new(wilai_core::Mode::Normal, audit_tx.clone());
+
+    let auto_detect_handle = if cli.no_auto_detect || !cfg.mode.auto_detect {
+        tracing::info!("auto-detect disabled");
+        None
+    } else {
+        let detect_cfg = DetectConfig {
+            threshold: cfg.mode.threshold,
+            ..DetectConfig::default()
+        };
+        tracing::info!(threshold = detect_cfg.threshold, "starting auto-detect");
+        Some(spawn_detect(mode.clone(), detect_cfg))
+    };
+
     let service = Arc::new(Service {
         cfg: cfg.clone(),
         registry,
         audit_tx,
+        mode,
         default_provider: cfg.general.default_provider,
         default_model: cfg.general.default_model,
         confirm_timeout_s: cfg.general.confirm_timeout_s,
@@ -58,6 +78,9 @@ async fn main() -> Result<()> {
         }
     }
 
+    if let Some(h) = auto_detect_handle {
+        h.abort();
+    }
     let _ = std::fs::remove_file(&socket_path);
     drop(audit_handle);
     Ok(())

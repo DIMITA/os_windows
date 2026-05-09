@@ -41,11 +41,19 @@ impl Default for Config {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct General {
+    #[serde(default = "default_provider_name")]
     pub default_provider: String,
+    #[serde(default = "default_model_name")]
     pub default_model: String,
+    #[serde(default = "default_confirm_timeout_s")]
     pub confirm_timeout_s: u32,
+    #[serde(default)]
     pub system_prompt: Option<String>,
 }
+
+fn default_provider_name() -> String { "ollama".to_string() }
+fn default_model_name() -> String { "mistral:7b-instruct".to_string() }
+fn default_confirm_timeout_s() -> u32 { 30 }
 
 impl Default for General {
     fn default() -> Self {

@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use wilai_audit::entry::EntryPayload;
 use wilai_audit::writer::WriteRequest;
 use wilai_core::types::new_ulid;
-use wilai_core::Mode;
+use wilai_core::{Category, Mode};
 use wilai_providers::{ChatRequest, Message, MessageRole, Provider, ToolCall};
 use wilai_tools::confirm::{ConfirmAnswer, ConfirmDefault, Confirmer};
 use wilai_tools::guards::{evaluate, GuardOutcome};
@@ -57,7 +57,7 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         .audit_tx
         .send(WriteRequest {
             session: session_id.clone(),
-            mode: Mode::Normal,
+            mode: service.mode.current().await,
             payload: EntryPayload::SessionStart {
                 entry: "wilai-daemon".to_string(),
                 cwd,
@@ -70,6 +70,10 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
             session: session_id.clone(),
         })
         .await;
+    // Subscribe to mode changes so this connection learns about auto-switches
+    // happening elsewhere in the daemon.
+    let mode_changes = service.mode.subscribe().await;
+    spawn_mode_relay(mode_changes, event_tx.clone(), service.mode.clone());
 
     // Reader loop: parse client ops; for ConfirmAnswer, deliver via pending; for
     // Prompt, run the agent loop; for Quit, break.
@@ -119,10 +123,50 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                         .await;
                 }
             }
+            ClientOp::ModeGet => {
+                let cur = service.mode.current().await;
+                let _ = event_tx
+                    .send(ServerEvent::Mode {
+                        current: cur.to_string(),
+                        pentest_in_flight: service.mode.pentest_in_flight(),
+                    })
+                    .await;
+            }
+            ClientOp::ModeSet { to, trigger } => {
+                let target: Mode = match to.parse() {
+                    Ok(m) => m,
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(ServerEvent::Error {
+                                message: format!("bad mode: {e}"),
+                            })
+                            .await;
+                        continue;
+                    }
+                };
+                let trig = trigger.unwrap_or_else(|| "manual".to_string());
+                match service.mode.set(target, &trig).await {
+                    Ok(_) => {
+                        let _ = event_tx
+                            .send(ServerEvent::Mode {
+                                current: service.mode.current().await.to_string(),
+                                pentest_in_flight: service.mode.pentest_in_flight(),
+                            })
+                            .await;
+                    }
+                    Err(e) => {
+                        let _ = event_tx
+                            .send(ServerEvent::Error {
+                                message: format!("{e}"),
+                            })
+                            .await;
+                    }
+                }
+            }
             ClientOp::Prompt { text, model, provider } => {
                 let model = model.unwrap_or(service.default_model.clone());
                 let provider_name = provider.unwrap_or(service.default_provider.clone());
-                let provider = match service.build_provider(&provider_name) {
+                let provider = match service.build_provider(&provider_name).await {
                     Ok(p) => p,
                     Err(e) => {
                         let _ = event_tx
@@ -161,7 +205,7 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         .audit_tx
         .send(WriteRequest {
             session: session_id,
-            mode: Mode::Normal,
+            mode: service.mode.current().await,
             payload: EntryPayload::SessionEnd,
         })
         .await;
@@ -229,13 +273,14 @@ async fn run_turn(
         let resp = provider.chat(req).await;
         let duration_ms = start.elapsed().as_millis() as u64;
 
+        let mode_now = service.mode.current().await;
         let resp = match resp {
             Ok(r) => {
                 let _ = service
                     .audit_tx
                     .send(WriteRequest {
                         session: session_id.to_string(),
-                        mode: Mode::Normal,
+                        mode: mode_now,
                         payload: EntryPayload::ProviderCall {
                             provider: provider.name().to_string(),
                             model: model.to_string(),
@@ -255,7 +300,7 @@ async fn run_turn(
                     .audit_tx
                     .send(WriteRequest {
                         session: session_id.to_string(),
-                        mode: Mode::Normal,
+                        mode: mode_now,
                         payload: EntryPayload::ProviderCall {
                             provider: provider.name().to_string(),
                             model: model.to_string(),
@@ -380,6 +425,7 @@ async fn execute_call(
         .registry
         .get(&tc.name)
         .ok_or_else(|| anyhow!("unknown tool: {}", tc.name))?;
+    let mode_now = service.mode.current().await;
 
     let validated = match wilai_tools::validator::validate_args(spec, &tc.arguments) {
         Ok(v) => v,
@@ -389,7 +435,7 @@ async fn execute_call(
                 .audit_tx
                 .send(WriteRequest {
                     session: session.to_string(),
-                    mode: Mode::Normal,
+                    mode: mode_now,
                     payload: EntryPayload::ToolDeny {
                         tool_name: tc.name.clone(),
                         args: tc.arguments.clone(),
@@ -402,14 +448,14 @@ async fn execute_call(
         }
     };
 
-    match evaluate(spec, &validated, Mode::Normal)? {
+    match evaluate(spec, &validated, mode_now)? {
         GuardOutcome::Allow => {}
         GuardOutcome::Deny { reason, guard } => {
             let _ = service
                 .audit_tx
                 .send(WriteRequest {
                     session: session.to_string(),
-                    mode: Mode::Normal,
+                    mode: mode_now,
                     payload: EntryPayload::ToolDeny {
                         tool_name: spec.name.clone(),
                         args: validated.clone(),
@@ -438,7 +484,7 @@ async fn execute_call(
                 .audit_tx
                 .send(WriteRequest {
                     session: session.to_string(),
-                    mode: Mode::Normal,
+                    mode: mode_now,
                     payload: EntryPayload::ToolConfirm {
                         tool_name: spec.name.clone(),
                         args: validated.clone(),
@@ -454,20 +500,38 @@ async fn execute_call(
         }
     }
 
+    // Track pentest tools in flight so we can refuse exit-from-pentest
+    // while one is running.
+    let is_pentest_tool = matches!(spec.category, Category::Pentest);
+    if is_pentest_tool {
+        service.mode.pentest_started();
+    }
     let result = Executor::run(spec, &validated)
         .await
-        .with_context(|| format!("execute {}", spec.name))?;
+        .with_context(|| format!("execute {}", spec.name));
+    if is_pentest_tool {
+        service.mode.pentest_finished();
+    }
+    let result = result?;
 
     let exec_kind = match &spec.executor {
         wilai_tools::ExecutorSpec::Subprocess(_) => "subprocess",
         wilai_tools::ExecutorSpec::Builtin(_) => "builtin",
     };
 
-    let logged_args = filter_args(&validated, spec);
+    // In pentest mode the audit log is verbose: full args (no field filter)
+    // and a larger output sample for forensic replay.
+    let pentest_mode = mode_now == Mode::Pentest;
+    let logged_args = if pentest_mode {
+        validated.clone()
+    } else {
+        filter_args(&validated, spec)
+    };
+    let sample_limit = if pentest_mode { 65536 } else { 1024 };
     let sample = if result.output.is_empty() {
         None
     } else {
-        let limit = result.output.len().min(1024);
+        let limit = result.output.len().min(sample_limit);
         Some(safe_slice(&result.output, limit).to_string())
     };
 
@@ -475,7 +539,7 @@ async fn execute_call(
         .audit_tx
         .send(WriteRequest {
             session: session.to_string(),
-            mode: Mode::Normal,
+            mode: mode_now,
             payload: EntryPayload::ToolExec {
                 tool_name: spec.name.clone(),
                 tool_version: spec.version,
@@ -498,6 +562,28 @@ async fn execute_call(
         .await;
 
     Ok(result.output)
+}
+
+fn spawn_mode_relay(
+    mut rx: mpsc::Receiver<crate::mode_mgr::ModeChange>,
+    event_tx: mpsc::Sender<ServerEvent>,
+    mode: std::sync::Arc<crate::mode_mgr::ModeManager>,
+) {
+    tokio::spawn(async move {
+        while let Some(_change) = rx.recv().await {
+            let cur = mode.current().await;
+            if event_tx
+                .send(ServerEvent::Mode {
+                    current: cur.to_string(),
+                    pentest_in_flight: mode.pentest_in_flight(),
+                })
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
 }
 
 fn filter_args(args: &Value, spec: &wilai_tools::ToolSpec) -> Value {

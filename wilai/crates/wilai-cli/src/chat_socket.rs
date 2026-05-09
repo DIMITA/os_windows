@@ -5,7 +5,12 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use wilai_daemon::protocol::{ClientOp, ConfirmReply, ServerEvent};
 
-pub async fn run(socket: &Path, once: Option<String>) -> Result<()> {
+pub async fn run(
+    socket: &Path,
+    once: Option<String>,
+    model: Option<String>,
+    provider: Option<String>,
+) -> Result<()> {
     let stream = match UnixStream::connect(socket).await {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound
@@ -26,7 +31,15 @@ pub async fn run(socket: &Path, once: Option<String>) -> Result<()> {
     eprintln!("connected to wilai-daemon, session={}", session);
 
     if let Some(prompt) = once {
-        send_op(&mut write_half, &ClientOp::Prompt { text: prompt, model: None, provider: None }).await?;
+        send_op(
+            &mut write_half,
+            &ClientOp::Prompt {
+                text: prompt,
+                model: model.clone(),
+                provider: provider.clone(),
+            },
+        )
+        .await?;
         drive_until_done(&mut reader, &mut write_half).await?;
         send_op(&mut write_half, &ClientOp::Quit).await?;
         return Ok(());
@@ -55,7 +68,11 @@ pub async fn run(socket: &Path, once: Option<String>) -> Result<()> {
         }
         if let Err(e) = send_op(
             &mut write_half,
-            &ClientOp::Prompt { text: prompt, model: None, provider: None },
+            &ClientOp::Prompt {
+                text: prompt,
+                model: model.clone(),
+                provider: provider.clone(),
+            },
         )
         .await
         {
@@ -136,6 +153,9 @@ where
             }
             ServerEvent::Bye => return Ok(()),
             ServerEvent::SessionStart { .. } => {}
+            ServerEvent::Mode { current, pentest_in_flight } => {
+                eprintln!("[mode] {current} (pentest in flight: {pentest_in_flight})");
+            }
         }
     }
 }

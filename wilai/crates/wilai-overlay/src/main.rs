@@ -144,6 +144,10 @@ async fn drive_session(cli: &Cli, socket: &Path, prompt: &str) -> Result<()> {
                 break;
             }
             ServerEvent::Bye => break,
+            ServerEvent::Mode { current, .. } => {
+                let urgency = if current == "pentest" { "critical" } else { "low" };
+                notify(cli, "Wilai mode", &current, urgency).await;
+            }
         }
     }
 

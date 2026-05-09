@@ -1,6 +1,7 @@
 mod audit_cmd;
 mod chat;
 mod chat_socket;
+mod mode_cmd;
 mod schema;
 
 use anyhow::Result;
@@ -47,6 +48,28 @@ enum Cmd {
         #[command(subcommand)]
         sub: ToolCmd,
     },
+    /// Mode inspection and switching (talks to wilai-daemon).
+    Mode {
+        #[command(subcommand)]
+        sub: ModeCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum ModeCmd {
+    /// Print the daemon's current mode.
+    Show {
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+    },
+    /// Switch the daemon to <mode> (normal | pentest).
+    Set {
+        mode: String,
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+        #[arg(long)]
+        trigger: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -84,7 +107,7 @@ async fn main() -> Result<()> {
                     Some(p) => p,
                     None => wilai_daemon::service::default_socket_path()?,
                 };
-                chat_socket::run(&path, once).await
+                chat_socket::run(&path, once, model, provider).await
             } else {
                 chat::run(once, model, provider).await
             }
@@ -96,6 +119,22 @@ async fn main() -> Result<()> {
         },
         Cmd::Tool { sub } => match sub {
             ToolCmd::List => list_tools(),
+        },
+        Cmd::Mode { sub } => match sub {
+            ModeCmd::Show { socket } => {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                mode_cmd::show(&path).await
+            }
+            ModeCmd::Set { mode, socket, trigger } => {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                mode_cmd::set(&path, &mode, trigger.as_deref()).await
+            }
         },
     }
 }

@@ -1,3 +1,4 @@
+use crate::mode_mgr::ModeManager;
 use anyhow::{anyhow, Context, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -5,7 +6,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::mpsc;
 use wilai_audit::writer::WriteRequest;
 use wilai_audit::AuditWriter;
-use wilai_core::Config;
+use wilai_core::{Config, Mode};
 use wilai_providers::{AnthropicProvider, OllamaProvider, Provider};
 use wilai_tools::Registry;
 
@@ -13,25 +14,27 @@ pub struct Service {
     pub cfg: Config,
     pub registry: Registry,
     pub audit_tx: mpsc::Sender<WriteRequest>,
+    pub mode: Arc<ModeManager>,
     pub default_provider: String,
     pub default_model: String,
     pub confirm_timeout_s: u32,
 }
 
 impl Service {
-    pub fn build_provider(&self, name: &str) -> Result<Box<dyn Provider>> {
+    /// Build a provider, honoring the cloud kill-switch in pentest mode.
+    pub async fn build_provider(&self, name: &str) -> Result<Box<dyn Provider>> {
         let pcfg = self
             .cfg
             .providers
             .get(name)
             .ok_or_else(|| anyhow!("provider {name} not in config"))?;
-        match pcfg.kind.as_str() {
+        let provider: Box<dyn Provider> = match pcfg.kind.as_str() {
             "ollama" => {
                 let url = pcfg
                     .url
                     .clone()
                     .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
-                Ok(Box::new(OllamaProvider::new(name, url)?))
+                Box::new(OllamaProvider::new(name, url)?)
             }
             "anthropic" => {
                 let env_var = pcfg
@@ -41,14 +44,16 @@ impl Service {
                 let key = std::env::var(&env_var).map_err(|_| {
                     anyhow!("env var {env_var} unset; required for anthropic provider")
                 })?;
-                Ok(Box::new(AnthropicProvider::new(
-                    name,
-                    key,
-                    pcfg.url.clone(),
-                )?))
+                Box::new(AnthropicProvider::new(name, key, pcfg.url.clone())?)
             }
-            other => Err(anyhow!("provider type {other} not implemented yet")),
+            other => return Err(anyhow!("provider type {other} not implemented yet")),
+        };
+        if self.mode.current().await == Mode::Pentest && !provider.is_local() {
+            return Err(anyhow!(
+                "provider `{name}` is non-local; cloud kill-switch is active in pentest mode"
+            ));
         }
+        Ok(provider)
     }
 }
 

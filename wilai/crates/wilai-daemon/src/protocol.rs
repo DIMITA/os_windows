@@ -15,6 +15,11 @@ pub enum ClientOp {
     },
     /// Reply to a previous `ConfirmAsk` event by id.
     ConfirmAnswer { id: String, answer: ConfirmReply },
+    /// Query the current mode. Daemon replies with a `Mode` event.
+    ModeGet,
+    /// Switch the daemon's mode. Replies with `Mode` on success or `Error`
+    /// (e.g. when leaving pentest while a pentest tool is in flight).
+    ModeSet { to: String, trigger: Option<String> },
     /// Close the session cleanly.
     Quit,
 }
@@ -54,6 +59,12 @@ pub enum ServerEvent {
     TurnDone,
     /// Hard error; the agent loop terminated.
     Error { message: String },
+    /// Daemon's current mode (response to `ModeGet`/`ModeSet`, or volunteered
+    /// when an auto-detect switch happens).
+    Mode {
+        current: String,
+        pentest_in_flight: u32,
+    },
     /// Final event before the connection closes.
     Bye,
 }

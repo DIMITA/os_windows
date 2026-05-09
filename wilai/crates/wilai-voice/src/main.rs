@@ -297,6 +297,9 @@ async fn run_daemon_turn(socket: &Path, prompt: &str) -> Result<Vec<String>> {
             }
             ServerEvent::Bye => break,
             ServerEvent::SessionStart { .. } => {}
+            ServerEvent::Mode { current, .. } => {
+                eprintln!("[voice] mode is now {current}");
+            }
         }
     }
 
