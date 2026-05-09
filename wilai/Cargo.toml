@@ -35,6 +35,8 @@ sha2 = "0.10"
 hex = "0.4"
 async-trait = "0.1"
 dirs = "5"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["std"] }
 
 wilai-core = { path = "crates/wilai-core" }
 wilai-audit = { path = "crates/wilai-audit" }

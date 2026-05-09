@@ -24,10 +24,18 @@ pub struct AuditWriter {
     file_name: String,
     running_hash: String,
     seq: u64,
+    signer: Option<crate::sign::AuditSigner>,
 }
 
 impl AuditWriter {
     pub fn open(dir: &Path) -> Result<Self> {
+        Self::open_with_signer(dir, None)
+    }
+
+    pub fn open_with_signer(
+        dir: &Path,
+        signer: Option<crate::sign::AuditSigner>,
+    ) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("create audit dir {}", dir.display()))?;
 
@@ -45,6 +53,7 @@ impl AuditWriter {
                 file_name: today.clone(),
                 running_hash,
                 seq: last_seq + 1,
+                signer,
             }
         } else {
             let head = ChainHead::load(&head_path)?;
@@ -62,6 +71,7 @@ impl AuditWriter {
                 file_name: today,
                 running_hash: running,
                 seq: 0,
+                signer,
             }
         };
 
@@ -149,7 +159,20 @@ impl AuditWriter {
                 obj.insert(k, v);
             }
         }
-        let bytes = serde_json::to_vec(&Value::Object(obj))?;
+        let unsigned_bytes = serde_json::to_vec(&Value::Object(obj))?;
+        let bytes: Vec<u8> = match &self.signer {
+            Some(s) => {
+                let sig_hex = s.sign_hex(&unsigned_bytes);
+                // Append `,"sig":"<hex>"` immediately before the trailing `}`.
+                let mut out = Vec::with_capacity(unsigned_bytes.len() + sig_hex.len() + 10);
+                out.extend_from_slice(&unsigned_bytes[..unsigned_bytes.len() - 1]);
+                out.extend_from_slice(b",\"sig\":\"");
+                out.extend_from_slice(sig_hex.as_bytes());
+                out.extend_from_slice(b"\"}");
+                out
+            }
+            None => unsigned_bytes,
+        };
         self.file.write_all(&bytes)?;
         self.file.write_all(b"\n")?;
         self.file.sync_data()?;

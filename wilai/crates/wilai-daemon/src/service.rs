@@ -118,7 +118,26 @@ pub async fn open_audit(cfg: &Config) -> Result<(AuditWriter, PathBuf)> {
         .clone()
         .map(Ok)
         .unwrap_or_else(wilai_core::paths::audit_dir)?;
-    let writer = AuditWriter::open(&dir)
+
+    // Load Ed25519 audit-signing key if one is present at the default path.
+    // Absence is normal (signing is opt-in); a parse error is a hard fail
+    // because silently writing unsigned entries would defeat the operator's
+    // intent.
+    let signer = match wilai_audit::sign::default_priv_path() {
+        Ok(p) if p.exists() => match wilai_audit::AuditSigner::load(&p) {
+            Ok(s) => {
+                tracing::info!(fp = %s.fingerprint(), "audit signing key loaded");
+                Some(s)
+            }
+            Err(e) => return Err(e.context(format!("load signing key {}", p.display()))),
+        },
+        _ => {
+            tracing::info!("no audit signing key; entries will be unsigned");
+            None
+        }
+    };
+
+    let writer = AuditWriter::open_with_signer(&dir, signer)
         .with_context(|| format!("open audit dir {}", dir.display()))?;
     Ok((writer, dir))
 }

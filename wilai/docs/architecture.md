@@ -281,8 +281,11 @@ Summary:
   chain spans rotations: the first entry of day N+1 hashes the last
   entry of day N. Tampering or reordering is detectable with
   `wilai audit verify`.
-- Optional Ed25519 signing is reserved for a later release; the `sig`
-  field is documented but not produced in v0.5.
+- **Ed25519 signing** in v1.0 (software key under
+  `~/.local/share/wilai/keys/audit.ed25519`). Opt-in via
+  `wilai audit keygen`; daemon picks it up at start. Each entry's
+  `sig` is over the canonical unsigned form ending in `}`; tamper
+  detection is layered with the hash chain.
 
 CLI:
 

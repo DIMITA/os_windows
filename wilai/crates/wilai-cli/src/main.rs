@@ -86,8 +86,19 @@ enum AuditCmd {
     },
     /// Show entries for a session id.
     Show { session: String },
-    /// Verify the hash chain.
-    Verify,
+    /// Verify the hash chain (and signatures, if a public key is present).
+    Verify {
+        /// Treat missing signatures as failures (default: warn-only).
+        #[arg(long)]
+        require_sig: bool,
+    },
+    /// Generate a fresh Ed25519 audit-signing keypair under
+    /// ~/.local/share/wilai/keys/. Refuses to overwrite an existing key.
+    Keygen {
+        /// Path to write the private key to.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -146,7 +157,8 @@ async fn main() -> Result<()> {
         Cmd::Audit { sub } => match sub {
             AuditCmd::Tail { n } => audit_cmd::tail(n),
             AuditCmd::Show { session } => audit_cmd::show(&session),
-            AuditCmd::Verify => audit_cmd::verify(),
+            AuditCmd::Verify { require_sig } => audit_cmd::verify(require_sig),
+            AuditCmd::Keygen { out } => audit_cmd::keygen(out.as_deref()),
         },
         Cmd::Tool { sub } => match sub {
             ToolCmd::List => list_tools(),

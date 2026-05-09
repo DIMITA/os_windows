@@ -69,19 +69,45 @@ pub fn show(session: &str) -> Result<()> {
     Ok(())
 }
 
-pub fn verify() -> Result<()> {
+pub fn verify(require_sig: bool) -> Result<()> {
     use sha2::{Digest, Sha256};
     let dir = audit_dir()?;
     if !dir.exists() {
         eprintln!("no audit dir");
         return Ok(());
     }
+
+    // Optional signature verification. Try to load the default public key.
+    let pub_path = wilai_audit::sign::default_pub_path()?;
+    let verifier = if pub_path.exists() {
+        match wilai_audit::AuditVerifier::load(&pub_path) {
+            Ok(v) => {
+                println!("audit pub key: {}", pub_path.display());
+                Some(v)
+            }
+            Err(e) => {
+                eprintln!("warning: could not load pub key at {}: {e:#}", pub_path.display());
+                None
+            }
+        }
+    } else {
+        if require_sig {
+            return Err(anyhow::anyhow!(
+                "--require-sig set but no public key at {}",
+                pub_path.display()
+            ));
+        }
+        None
+    };
+
     let files = list_files(&dir)?;
     let mut prev_hash = String::from(
         "0000000000000000000000000000000000000000000000000000000000000000",
     );
     let mut total = 0u64;
     let mut errors = 0u64;
+    let mut signed = 0u64;
+    let mut unsigned = 0u64;
 
     for f in &files {
         let bytes = fs::read(f)?;
@@ -127,15 +153,82 @@ pub fn verify() -> Result<()> {
                     }
                     last_seq = Some(seq);
                 }
+
+                // Signature verification, if any.
+                match wilai_audit::sign::split_signed_line(line) {
+                    Ok(Some((unsigned_bytes, sig_hex))) => {
+                        signed += 1;
+                        if let Some(ver) = verifier.as_ref() {
+                            if let Err(e) = ver.verify_hex(&unsigned_bytes, &sig_hex) {
+                                eprintln!(
+                                    "{}: bad signature at seq={:?}: {e:#}",
+                                    f.display(),
+                                    v.get("seq")
+                                );
+                                errors += 1;
+                            }
+                        }
+                    }
+                    Ok(None) => {
+                        unsigned += 1;
+                        if require_sig {
+                            eprintln!(
+                                "{}: missing signature at seq={:?}",
+                                f.display(),
+                                v.get("seq")
+                            );
+                            errors += 1;
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("{}: malformed sig at seq={:?}: {e:#}",
+                            f.display(), v.get("seq"));
+                        errors += 1;
+                    }
+                }
+
                 let mut h = Sha256::new();
                 h.update(line);
                 prev_hash = hex::encode(h.finalize());
             }
         }
     }
-    println!("verified {} entries across {} files; {} errors", total, files.len(), errors);
+    println!(
+        "verified {} entries across {} files; {} signed, {} unsigned; {} errors",
+        total,
+        files.len(),
+        signed,
+        unsigned,
+        errors,
+    );
     if errors > 0 {
         std::process::exit(1);
     }
+    Ok(())
+}
+
+pub fn keygen(out: Option<&std::path::Path>) -> Result<()> {
+    let target: PathBuf = match out {
+        Some(p) => p.to_path_buf(),
+        None => wilai_audit::sign::default_priv_path()?,
+    };
+    if target.exists() {
+        return Err(anyhow::anyhow!(
+            "{} already exists; refusing to overwrite",
+            target.display()
+        ));
+    }
+    let signer = wilai_audit::sign::generate_to(&target)?;
+    let pub_path: PathBuf = {
+        let mut p = target.clone();
+        let mut name = target.file_name().unwrap_or_default().to_os_string();
+        name.push(".pub");
+        p.set_file_name(name);
+        p
+    };
+    println!("private: {}", target.display());
+    println!("public:  {}", pub_path.display());
+    println!("pub_key: {}", signer.public_key_hex());
+    println!("fp:      {}", signer.fingerprint());
     Ok(())
 }

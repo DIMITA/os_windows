@@ -20,13 +20,15 @@ the metadata level. It is the operator's primary forensic surface.
 
 ## 2. Non-goals (v1)
 
-- No cryptographic signing of entries. The format reserves a `sig`
-  field; v0.5 does not produce one. Hardware-backed signing
-  (YubiKey / PIV) is planned for a later release.
 - No remote shipping. If the operator wants offsite copies, they wire
   `journalctl` or `rsync` themselves; Wilai does not ship anything.
 - No structured query engine beyond the CLI's `grep` / `tail` / `show`.
   Heavy analytics belong in DuckDB or similar, fed from the JSONL.
+- No hardware-backed signing in v1.0. The format and codepath are
+  ready (the `sig` field is produced by an Ed25519 software key) but
+  the key lives in `~/.local/share/wilai/keys/audit.ed25519` and is
+  protected by filesystem permissions only. A YubiKey/PIV variant
+  reuses the same `sig` field at the wire level.
 
 ## 3. On-disk layout
 
@@ -84,7 +86,7 @@ Section 5). Schema version is carried in the `v` field.
 | `kind`       | string  | yes      | Entry type (see below).                    |
 | `session`    | string  | yes      | ULID of the chat session.                  |
 | `mode`       | string  | yes      | `normal` or `pentest` at the time.         |
-| `sig`        | string? | no       | Reserved for Ed25519 signing. Absent in v0.5. |
+| `sig`        | string? | no       | Hex Ed25519 signature over the unsigned entry bytes. Absent when no key is configured. |
 
 `prev_hash` and `seq` are the tamper-evidence pair. Verifying one
 without the other catches different attacks: `prev_hash` catches
@@ -418,18 +420,67 @@ counts, deny counts, mode time-in-mode, provider call totals, and the
 first/last `prev_hash` of the day for quick external pinning. The
 summary is derived; the JSONL remains source of truth.
 
-## 12. Future: signing
+## 12. Signing (v1.0, software key)
 
-A later release will add Ed25519 signing of the chain. Two modes
-contemplated:
+Each entry can carry an Ed25519 signature in the `sig` field. Signing
+is opt-in; absence of a key produces unsigned entries and the chain
+remains valid (verify reports `unsigned` counts but does not fail
+unless `--require-sig` is passed).
 
-- **Software key**: a daemon-held private key in
-  `~/.local/share/wilai/keys/audit.ed25519`, mode `0600`. Convenient,
-  same trust boundary as the daemon itself.
-- **Hardware key**: signing operation delegated to a YubiKey or PIV
-  card. Requires user touch on every rotation (not every entry; the
-  rotation epilogue carries an aggregate signature over the chain
-  segment). Stronger guarantee, more friction.
+### 12.1. Key generation
 
-The `sig` field is reserved in v1; readers ignore it when absent.
-Adding signing is additive and does not break v1 logs.
+```
+wilai audit keygen
+```
+
+Creates `~/.local/share/wilai/keys/audit.ed25519` (32-byte raw secret,
+mode `0600`) and `audit.ed25519.pub` (32-byte raw public, mode `0644`).
+The CLI prints the public key in hex and an 8-byte fingerprint
+(`sha256(pub)[..8]`) for offsite pinning.
+
+### 12.2. What is signed
+
+The signature covers the entry's bytes BEFORE the `,"sig":"<hex>"`
+suffix is appended. Concretely:
+
+- The writer builds the JSON object without a `sig` key, serializes
+  it (call this `unsigned_bytes`, ending with `}`).
+- It signs `unsigned_bytes` with Ed25519.
+- It removes the trailing `}`, appends `,"sig":"<hex>"}`, and writes
+  the resulting bytes to disk.
+- The entry's `prev_hash` for the NEXT line is computed over the
+  signed bytes (so a tamper that changes the sig also breaks the
+  chain).
+
+This avoids JSON canonicalization headaches: the verifier slices the
+trailing `,"sig":"..."}` off the line, restores `}`, and gets the
+exact bytes that were signed.
+
+### 12.3. Verification
+
+```
+wilai audit verify              # warns on missing sigs
+wilai audit verify --require-sig  # treats missing sigs as errors
+```
+
+Verify loads `audit.ed25519.pub` from the default path. For each
+signed entry it splits the line, reconstructs the unsigned bytes, and
+calls Ed25519 verify. A mismatch is reported with the offending
+`seq` and the line proceeds to the next so the operator sees the full
+extent of the breach in one pass.
+
+### 12.4. Future: hardware key
+
+The `sig` field is opaque to the format - swapping the software
+implementation for a YubiKey/PIV signer requires no schema change.
+The trade-off:
+
+- **Software key (v1.0)**: same trust boundary as the daemon. Trivial
+  to deploy. A privileged attacker who gets to the keyfile can
+  retroactively re-sign the log; `chattr +a` and the hash chain are
+  the floor against this.
+- **Hardware key**: every signature requires a user touch. To make
+  this viable for a per-entry log, sign the rotated file's tail hash
+  rather than every entry. A `system.rotate_post.sig` field over the
+  closed file's last hash gives a verifiable seal at file granularity
+  without a button press per tool call.
