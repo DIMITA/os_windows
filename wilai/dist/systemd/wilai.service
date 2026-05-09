@@ -1,0 +1,24 @@
+[Unit]
+Description=Wilai system agent daemon
+Documentation=https://github.com/dimita/os_windows
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wilai-daemon --log info
+Restart=on-failure
+RestartSec=2
+# The daemon binds to $XDG_RUNTIME_DIR/wilai.sock with mode 0600. Rely on the
+# user's runtime dir; do not let it leak elsewhere.
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+# Audit log lives under $XDG_DATA_HOME/wilai (defaults to ~/.local/share/wilai);
+# the runtime dir holds the socket.
+ReadWritePaths=%h/.local/share/wilai
+ReadWritePaths=%t
+
+[Install]
+WantedBy=graphical-session.target

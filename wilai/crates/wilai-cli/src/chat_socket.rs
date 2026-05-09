@@ -6,9 +6,18 @@ use tokio::net::UnixStream;
 use wilai_daemon::protocol::{ClientOp, ConfirmReply, ServerEvent};
 
 pub async fn run(socket: &Path, once: Option<String>) -> Result<()> {
-    let stream = UnixStream::connect(socket)
-        .await
-        .with_context(|| format!("connect {}", socket.display()))?;
+    let stream = match UnixStream::connect(socket).await {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound
+            || e.kind() == std::io::ErrorKind::ConnectionRefused =>
+        {
+            spawn_daemon(socket).await?;
+            UnixStream::connect(socket)
+                .await
+                .with_context(|| format!("connect {} after spawn", socket.display()))?
+        }
+        Err(e) => return Err(e).with_context(|| format!("connect {}", socket.display())),
+    };
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
@@ -129,6 +138,39 @@ where
             ServerEvent::SessionStart { .. } => {}
         }
     }
+}
+
+async fn spawn_daemon(socket: &Path) -> Result<()> {
+    let exe = std::env::current_exe()?;
+    let daemon_bin = exe
+        .parent()
+        .map(|p| p.join("wilai-daemon"))
+        .unwrap_or_else(|| std::path::PathBuf::from("wilai-daemon"));
+    let bin = if daemon_bin.exists() {
+        daemon_bin
+    } else {
+        std::path::PathBuf::from("wilai-daemon")
+    };
+    eprintln!("starting wilai-daemon...");
+    std::process::Command::new(&bin)
+        .arg("--socket")
+        .arg(socket)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .with_context(|| format!("spawn {}", bin.display()))?;
+    // Wait for the socket to appear; bounded retry.
+    for _ in 0..40 {
+        if socket.exists() && UnixStream::connect(socket).await.is_ok() {
+            return Ok(());
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    Err(anyhow!(
+        "daemon failed to bind {} within 2s",
+        socket.display()
+    ))
 }
 
 async fn send_op<W: AsyncWriteExt + Unpin>(writer: &mut W, op: &ClientOp) -> Result<()> {

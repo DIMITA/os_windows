@@ -6,6 +6,8 @@ members = [
     "crates/wilai-tools",
     "crates/wilai-providers",
     "crates/wilai-daemon",
+    "crates/wilai-voice",
+    "crates/wilai-overlay",
     "crates/wilai-cli",
 ]
 
@@ -39,6 +41,8 @@ wilai-audit = { path = "crates/wilai-audit" }
 wilai-tools = { path = "crates/wilai-tools" }
 wilai-providers = { path = "crates/wilai-providers" }
 wilai-daemon = { path = "crates/wilai-daemon" }
+wilai-voice = { path = "crates/wilai-voice" }
+wilai-overlay = { path = "crates/wilai-overlay" }
 
 [profile.release]
 lto = "thin"
