@@ -102,3 +102,9 @@ sits in the shell, the design system, and the install experience.
 | PolicyKit policy for installer   | `distro/airootfs/usr/share/polkit-1/actions/`              |
 | Installer desktop entry          | `distro/airootfs/usr/share/applications/`                  |
 | Wilbar (native top bar, Rust)    | `wilbar/` (Cargo crate)                                    |
+| Wildock (native dock, Rust)      | `wildock/` (Cargo crate)                                   |
+| Wildock pinned items config      | `distro/airootfs/etc/wilos/dock.toml`                      |
+| Wilcenter (command palette)      | `distro/airootfs/usr/local/bin/wilcenter`                  |
+| Snap layouts overlay             | `distro/airootfs/usr/local/bin/wilos-snap`                 |
+| Notes app                        | `distro/airootfs/usr/local/bin/wilos-notes`                |
+| Calendar / Mail / Camera shells  | `distro/airootfs/usr/share/applications/wilos-{calendar,mail,camera}.desktop` |

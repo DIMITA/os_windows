@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Mail
+GenericName=Mail
+Comment=Read and write email
+TryExec=geary
+Exec=geary
+Icon=wilos-mail
+Terminal=false
+Categories=Office;Network;Email;
+Keywords=email;mail;message;
+StartupNotify=true
+StartupWMClass=geary

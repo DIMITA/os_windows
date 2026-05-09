@@ -1,22 +1,22 @@
 [package]
-name        = "wilbar"
-version     = "0.0.2"
+name        = "wildock"
+version     = "0.0.1"
 edition     = "2021"
 authors     = ["The WilOS authors"]
-description = "Native Aurora top bar for WilOS (Wayland, GTK4)"
+description = "Native Aurora dock for WilOS (Wayland, GTK4)"
 license     = "MIT"
 repository  = "https://wilos.example/"
 readme      = "README.md"
-default-run = "wilbar"
 
 [dependencies]
 gtk             = { package = "gtk4", version = "0.9", features = ["v4_12"] }
 gtk4-layer-shell = "0.4"
 glib            = "0.20"
-chrono          = { version = "0.4", features = ["clock"] }
+serde           = { version = "1", features = ["derive"] }
+toml            = "0.8"
 
 [[bin]]
-name = "wilbar"
+name = "wildock"
 path = "src/main.rs"
 
 [profile.release]

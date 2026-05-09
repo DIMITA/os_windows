@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Calendar
+GenericName=Calendar
+Comment=Manage your schedule
+TryExec=gnome-calendar
+Exec=gnome-calendar
+Icon=wilos-calendar
+Terminal=false
+Categories=Office;Calendar;
+Keywords=calendar;schedule;agenda;events;
+StartupNotify=true
+StartupWMClass=org.gnome.Calendar

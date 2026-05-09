@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aM" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#9BE3C0"/>
+    </linearGradient>
+  </defs>
+  <rect x="6" y="14" width="52" height="40" rx="6"
+        fill="#1B1442" stroke="url(#aM)" stroke-width="1.8"/>
+  <!-- envelope flap -->
+  <path d="M6 18 L32 38 L58 18"
+        fill="none" stroke="url(#aM)" stroke-width="2.2"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- corner arrows hint = unread -->
+  <circle cx="50" cy="20" r="6" fill="url(#aM)"/>
+  <text x="50" y="24" text-anchor="middle" font-family="Inter,sans-serif"
+        font-size="9" font-weight="700" fill="#0F0F17">3</text>
+</svg>

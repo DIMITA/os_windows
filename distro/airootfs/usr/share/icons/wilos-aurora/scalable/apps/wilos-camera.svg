@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aCa" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="16" width="56" height="40" rx="8"
+        fill="#1B1442" stroke="url(#aCa)" stroke-width="1.8"/>
+  <path d="M22 16 l4 -6 h12 l4 6" fill="none"
+        stroke="url(#aCa)" stroke-width="1.8" stroke-linejoin="round"/>
+  <circle cx="32" cy="36" r="12" fill="none" stroke="url(#aCa)" stroke-width="2"/>
+  <circle cx="32" cy="36" r="6"  fill="url(#aCa)"/>
+  <circle cx="50" cy="24" r="2"  fill="url(#aCa)"/>
+</svg>

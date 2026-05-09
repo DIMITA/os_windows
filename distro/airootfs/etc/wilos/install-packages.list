@@ -54,6 +54,9 @@ nautilus
 loupe
 gnome-text-editor
 gnome-calculator
+gnome-calendar
+gnome-snapshot
+geary
 file-roller
 mpv
 kitty

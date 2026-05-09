@@ -101,6 +101,9 @@ loupe
 gnome-text-editor
 gnome-calculator
 gnome-clocks
+gnome-calendar
+gnome-snapshot
+geary
 file-roller
 mpv
 

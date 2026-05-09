@@ -1,0 +1,273 @@
+#!/usr/bin/env python3
+"""
+wilos-snap — snap layout chooser.
+
+A transparent fullscreen GTK4 overlay that shows 6 preset layouts as
+glass cards. Picking one rearranges the windows of the current
+workspace via Hyprland's IPC (`hyprctl`):
+
+  ╭──────────╮  ╭─────┬────╮  ╭─────┬────╮  ╭──┬──┬──╮
+  │  Maxi    │  │ L   │ R  │  │     │ ↑  │  │L │M │R │
+  │          │  │     │    │  │  L  ├────┤  │  │  │  │
+  │          │  │     │    │  │     │ ↓  │  │  │  │  │
+  ╰──────────╯  ╰─────┴────╯  ╰─────┴────╯  ╰──┴──┴──╯
+   maxi          50/50         50 + ud         thirds
+
+  ╭─────┬────╮  ╭────┬─────╮
+  │     │T   │  │ T  │     │
+  │  L  ├────┤  ├────┤  R  │
+  │     │B   │  │ B  │     │
+  ╰─────┴────╯  ╰────┴─────╯
+   sidebar-l      sidebar-r
+
+Bound to Super+Shift+S in hyprland.conf. Hovering a card previews
+the resulting placement of the focused window.
+"""
+
+from __future__ import annotations
+
+import gi, json, subprocess, sys
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk  # noqa: E402
+
+APP_ID = "org.wilos.SnapLayouts"
+
+
+# ------------------------------------------------------------------- #
+# Layout primitives — fractions of the workspace area.
+# Each layout is a list of slots (x, y, w, h) in 0..1.
+# ------------------------------------------------------------------- #
+
+LAYOUTS = {
+    "maxi":      [(0.0, 0.0, 1.0, 1.0)],
+    "split":     [(0.0, 0.0, 0.5, 1.0), (0.5, 0.0, 0.5, 1.0)],
+    "split-ud":  [(0.0, 0.0, 0.5, 1.0),
+                  (0.5, 0.0, 0.5, 0.5),
+                  (0.5, 0.5, 0.5, 0.5)],
+    "thirds":    [(0.0, 0.0, 1/3, 1.0),
+                  (1/3, 0.0, 1/3, 1.0),
+                  (2/3, 0.0, 1/3, 1.0)],
+    "sidebar-l": [(0.0, 0.0, 0.6, 1.0),
+                  (0.6, 0.0, 0.4, 0.5),
+                  (0.6, 0.5, 0.4, 0.5)],
+    "sidebar-r": [(0.4, 0.0, 0.6, 1.0),
+                  (0.0, 0.0, 0.4, 0.5),
+                  (0.0, 0.5, 0.4, 0.5)],
+}
+
+LABELS = {
+    "maxi":      "Fullscreen",
+    "split":     "Split 50/50",
+    "split-ud":  "Main + stack",
+    "thirds":    "Thirds",
+    "sidebar-l": "Sidebar right",
+    "sidebar-r": "Sidebar left",
+}
+
+
+# ------------------------------------------------------------------- #
+# Hyprland glue
+# ------------------------------------------------------------------- #
+
+def hyprctl_json(*args):
+    try:
+        out = subprocess.check_output(["hyprctl", "-j", *args], text=True,
+                                      stderr=subprocess.DEVNULL)
+        return json.loads(out)
+    except (FileNotFoundError, subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+
+
+def active_workspace():
+    return hyprctl_json("activeworkspace")
+
+
+def clients_on(workspace_id):
+    cs = hyprctl_json("clients") or []
+    return [c for c in cs
+            if c.get("workspace", {}).get("id") == workspace_id
+            and not c.get("floating", False)
+            and c.get("mapped", True)
+            and not c.get("hidden", False)]
+
+
+def monitor_for(workspace):
+    if not workspace: return None
+    mons = hyprctl_json("monitors") or []
+    name = workspace.get("monitor")
+    for m in mons:
+        if m.get("name") == name:
+            return m
+    return mons[0] if mons else None
+
+
+def apply_layout(name):
+    ws = active_workspace()
+    mon = monitor_for(ws)
+    if not ws or not mon:
+        return
+    clients = clients_on(ws["id"])
+    if not clients:
+        return
+
+    # Reserved space (top bar + dock margins) — Hyprland's monitor `reserved`
+    # gives top/bottom/left/right.
+    rsv = mon.get("reserved", [0, 0, 0, 0])
+    x0 = mon["x"] + rsv[0]
+    y0 = mon["y"] + rsv[1]
+    w  = mon["width"]  - rsv[0] - rsv[2]
+    h  = mon["height"] - rsv[1] - rsv[3]
+
+    slots = LAYOUTS[name]
+
+    # Float every client first so we can place them precisely.
+    for c in clients:
+        addr = c["address"]
+        subprocess.run(["hyprctl", "dispatch", "setfloating",
+                        f"address:{addr}"], check=False, stdout=subprocess.DEVNULL)
+
+    # Assign clients to slots in MRU order. Extras land in the last slot,
+    # stacked offset.
+    for i, c in enumerate(clients):
+        slot = slots[min(i, len(slots) - 1)]
+        sx, sy, sw, sh = slot
+        px = int(x0 + sx * w)
+        py = int(y0 + sy * h)
+        pw = int(sw * w)
+        ph = int(sh * h)
+        if i >= len(slots):
+            offset = (i - len(slots) + 1) * 24
+            px += offset
+            py += offset
+
+        addr = c["address"]
+        subprocess.run(["hyprctl", "dispatch", "moveactive",
+                        "exact", str(px), str(py),
+                        f"address:{addr}"],
+                       check=False, stdout=subprocess.DEVNULL)
+        subprocess.run(["hyprctl", "dispatch", "resizeactive",
+                        "exact", str(pw), str(ph),
+                        f"address:{addr}"],
+                       check=False, stdout=subprocess.DEVNULL)
+
+
+# ------------------------------------------------------------------- #
+# UI
+# ------------------------------------------------------------------- #
+
+CSS = """
+window#wilsnap {
+    background: rgba(8, 8, 14, 0.55);
+}
+.snap-card {
+    background: rgba(20, 20, 30, 0.55);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 18px;
+    padding: 18px;
+    transition: all 200ms ease;
+}
+.snap-card:hover {
+    background: rgba(124, 200, 255, 0.20);
+    border-color: rgba(124, 200, 255, 0.45);
+}
+.snap-label {
+    color: #FFFFFF;
+    font-weight: 600;
+    margin-top: 8px;
+}
+.snap-tile {
+    background: rgba(124, 200, 255, 0.40);
+    border: 1px solid rgba(124, 200, 255, 0.65);
+    border-radius: 6px;
+}
+"""
+
+
+def make_preview(layout_name, w=180, h=120):
+    """A small DrawingArea-free preview using a Fixed layout of glass tiles."""
+    fixed = Gtk.Fixed()
+    fixed.set_size_request(w, h)
+    pad = 4
+    for sx, sy, sw, sh in LAYOUTS[layout_name]:
+        tile = Gtk.Frame()
+        tile.add_css_class("snap-tile")
+        tw = max(8, int(sw * w) - pad * 2)
+        th = max(8, int(sh * h) - pad * 2)
+        tile.set_size_request(tw, th)
+        fixed.put(tile, int(sx * w) + pad, int(sy * h) + pad)
+    return fixed
+
+
+class SnapWindow(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Snap layouts",
+                         decorated=False, resizable=False)
+        self.set_widget_name("wilsnap")
+        self.fullscreen()
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                        halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER,
+                        spacing=24)
+        self.set_child(outer)
+
+        title = Gtk.Label(label="Choose a layout")
+        title.add_css_class("title-1")
+        outer.append(title)
+
+        grid = Gtk.Grid(column_spacing=18, row_spacing=18)
+        outer.append(grid)
+
+        cells = list(LAYOUTS.keys())
+        for i, name in enumerate(cells):
+            card = Gtk.Button()
+            card.add_css_class("snap-card")
+            card.connect("clicked", lambda _b, n=name: self._pick(n))
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            inner.append(make_preview(name))
+            lbl = Gtk.Label(label=LABELS[name])
+            lbl.add_css_class("snap-label")
+            inner.append(lbl)
+            card.set_child(inner)
+            grid.attach(card, i % 3, i // 3, 1, 1)
+
+        hint = Gtk.Label(label="Esc to cancel  •  click a layout to apply")
+        hint.add_css_class("dim-label")
+        outer.append(hint)
+
+        # Esc closes.
+        ctrl = Gtk.EventControllerKey.new()
+        ctrl.connect("key-pressed",
+                     lambda _c, kv, *_: self.close()
+                     if kv == Gdk.KEY_Escape else False)
+        self.add_controller(ctrl)
+
+    def _pick(self, name):
+        try:
+            apply_layout(name)
+        finally:
+            self.close()
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS.encode())
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def do_activate(self):
+        SnapWindow(self).present()
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

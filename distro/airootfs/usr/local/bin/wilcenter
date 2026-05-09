@@ -1,0 +1,514 @@
+#!/usr/bin/env python3
+"""
+wilcenter — command palette for WilOS Aurora.
+
+Triggered by Super+/ (or run from anywhere). Floating glass card
+centered on the screen with one input line and a result list. The
+provider model is intentionally small and orthogonal:
+
+  • calc       inline arithmetic, e.g. "12 * 7 + 3"
+  • convert    unit conversions, e.g. "= 5 km in mi"
+  • clip       clipboard history (cliphist)
+  • file       find files in $HOME (case-insensitive, fuzzy)
+  • app        launch a .desktop application
+  • web        open a Google search in the default browser
+  • action     system actions (lock, logout, reboot, shutdown)
+
+Providers are pure Python — adding one is a single class with a
+`match()` and `query()` method. No external dependencies beyond
+GTK4 + libadwaita + python-gobject.
+"""
+
+from __future__ import annotations
+
+import gi, os, re, math, subprocess, shlex, glob, sys
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+gi.require_version("Gdk", "4.0")
+from gi.repository import Adw, Gdk, Gio, GLib, Gtk, Pango  # noqa: E402
+
+APP_ID  = "org.wilos.Center"
+HOME    = os.path.expanduser("~")
+MAX_RES = 8
+
+
+# ------------------------------------------------------------------- #
+# Result model
+# ------------------------------------------------------------------- #
+
+class Result:
+    __slots__ = ("title", "subtitle", "icon", "score", "action")
+
+    def __init__(self, title, subtitle="", icon="application-x-executable",
+                 score=0, action=None):
+        self.title    = title
+        self.subtitle = subtitle
+        self.icon     = icon
+        self.score    = score
+        self.action   = action or (lambda: None)
+
+
+# ------------------------------------------------------------------- #
+# Providers
+# ------------------------------------------------------------------- #
+
+class CalcProvider:
+    """Inline arithmetic. We expose a tiny safe-ish evaluator: only
+    numbers, basic operators, parentheses, and a handful of math
+    functions. No __builtins__, no attribute access."""
+
+    SAFE = {k: getattr(math, k) for k in (
+        "sqrt", "pow", "log", "log2", "log10", "exp", "sin", "cos", "tan",
+        "asin", "acos", "atan", "ceil", "floor", "pi", "e", "tau",
+    )}
+    PATTERN = re.compile(r"[\d\.\s\+\-\*\/\%\(\)\^,a-zA-Z_]+")
+
+    def match(self, q):
+        if not q or len(q) < 2:
+            return False
+        if not self.PATTERN.fullmatch(q):
+            return False
+        return any(c in q for c in "+-*/^()") or q.replace(".", "").replace(" ", "").isdigit()
+
+    def query(self, q):
+        try:
+            expr = q.replace("^", "**")
+            value = eval(expr, {"__builtins__": {}}, self.SAFE)  # noqa: S307
+        except Exception:
+            return []
+        if isinstance(value, float) and value.is_integer():
+            value = int(value)
+        text = f"{value}"
+        return [Result(text, q, "accessories-calculator", score=100,
+                       action=lambda v=text: _to_clipboard(v))]
+
+
+class ConvertProvider:
+    """Tiny unit converter triggered by `=` or `convert` prefix.
+    Examples:
+        = 5 km in mi
+        convert 100 lb to kg
+    """
+
+    UNITS = {
+        # length (metres)
+        "m": 1.0, "km": 1000.0, "cm": 0.01, "mm": 0.001,
+        "mi": 1609.344, "yd": 0.9144, "ft": 0.3048, "in": 0.0254,
+        # mass (grams)
+        "g": 1.0, "kg": 1000.0, "lb": 453.59237, "oz": 28.349523125,
+        # volume (litres)
+        "l": 1.0, "ml": 0.001, "gal": 3.785411784, "qt": 0.946352946,
+        # temperature handled separately
+    }
+    GROUPS = (
+        ("length", {"m", "km", "cm", "mm", "mi", "yd", "ft", "in"}),
+        ("mass",   {"g", "kg", "lb", "oz"}),
+        ("volume", {"l", "ml", "gal", "qt"}),
+    )
+
+    PATTERN = re.compile(
+        r"^\s*(?:=|convert)\s+([\d\.\-]+)\s*([a-zA-Z°]+)\s+(?:in|to)\s+([a-zA-Z°]+)\s*$",
+        re.IGNORECASE)
+
+    def match(self, q):
+        return bool(self.PATTERN.match(q))
+
+    def query(self, q):
+        m = self.PATTERN.match(q)
+        if not m:
+            return []
+        try:
+            value = float(m.group(1))
+        except ValueError:
+            return []
+        src = m.group(2).lower()
+        dst = m.group(3).lower()
+
+        # Temperature special case.
+        temp = {"c", "f", "k", "°c", "°f", "°k"}
+        if src in temp and dst in temp:
+            r = self._temperature(value, src.strip("°"), dst.strip("°"))
+            if r is None:
+                return []
+            text = f"{r:g} {dst}"
+            return [Result(text, f"{value:g} {src} → {text}",
+                           "accessories-calculator", score=100,
+                           action=lambda v=text: _to_clipboard(v))]
+
+        for _, group in self.GROUPS:
+            if src in group and dst in group:
+                meters = value * self.UNITS[src]
+                out    = meters / self.UNITS[dst]
+                text   = f"{out:g} {dst}"
+                return [Result(text, f"{value:g} {src} → {text}",
+                               "accessories-calculator", score=100,
+                               action=lambda v=text: _to_clipboard(v))]
+        return []
+
+    @staticmethod
+    def _temperature(v, src, dst):
+        if src == "c": k = v + 273.15
+        elif src == "f": k = (v - 32) * 5/9 + 273.15
+        elif src == "k": k = v
+        else: return None
+        if dst == "c": return k - 273.15
+        if dst == "f": return (k - 273.15) * 9/5 + 32
+        if dst == "k": return k
+        return None
+
+
+class ClipboardProvider:
+    """Browse cliphist history. Activate to copy back."""
+
+    def match(self, q):
+        return q.lower().startswith("clip ") or q.lower() == "clip"
+
+    def query(self, q):
+        if q.lower() == "clip":
+            needle = ""
+        else:
+            needle = q[5:].strip().lower()
+        try:
+            raw = subprocess.check_output(["cliphist", "list"], text=True,
+                                          stderr=subprocess.DEVNULL)
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            return []
+        out = []
+        for line in raw.splitlines()[:50]:
+            try:
+                num, body = line.split("\t", 1)
+            except ValueError:
+                continue
+            if needle and needle not in body.lower():
+                continue
+            preview = body[:80]
+            out.append(Result(preview, "clipboard #" + num,
+                              "edit-paste-symbolic",
+                              action=lambda n=num: _cliphist_paste(n)))
+        return out[:MAX_RES]
+
+
+class FileProvider:
+    """Recursive case-insensitive prefix match in $HOME."""
+
+    SKIP = {".cache", ".config", ".local", "node_modules", ".git", ".npm"}
+
+    def match(self, q):
+        return len(q) >= 3 and not q.startswith(("=", "?", "/"))
+
+    def query(self, q):
+        needle = q.lower()
+        out = []
+        for root, dirs, files in os.walk(HOME):
+            dirs[:] = [d for d in dirs if d not in self.SKIP and not d.startswith(".")]
+            for f in files:
+                if needle in f.lower():
+                    full = os.path.join(root, f)
+                    rel  = os.path.relpath(full, HOME)
+                    out.append(Result(f, "~/" + rel,
+                                      "text-x-generic-symbolic",
+                                      score=10 - len(rel),
+                                      action=lambda p=full: subprocess.Popen(["xdg-open", p])))
+                    if len(out) >= MAX_RES * 2:
+                        return out
+        return out
+
+
+class AppProvider:
+    """Match installed .desktop applications by name."""
+
+    DIRS = ["/usr/share/applications", "/usr/local/share/applications",
+            os.path.join(HOME, ".local/share/applications")]
+
+    def __init__(self):
+        self._apps = self._scan()
+
+    def _scan(self):
+        out = []
+        for d in self.DIRS:
+            for path in glob.glob(os.path.join(d, "*.desktop")):
+                try:
+                    info = Gio.DesktopAppInfo.new_from_filename(path)
+                except Exception:
+                    continue
+                if not info or info.get_nodisplay():
+                    continue
+                out.append(info)
+        return out
+
+    def match(self, q):
+        return len(q) >= 2 and not q.startswith(("=", "?", "/", "clip "))
+
+    def query(self, q):
+        needle = q.lower()
+        out = []
+        for info in self._apps:
+            name = info.get_name() or ""
+            if needle in name.lower():
+                icon = info.get_string("Icon") or "application-x-executable"
+                out.append(Result(name,
+                                  info.get_description() or "Launch",
+                                  icon,
+                                  score=20 - abs(len(name) - len(q)),
+                                  action=lambda i=info: i.launch([], None)))
+        return out[:MAX_RES]
+
+
+class WebProvider:
+    """Always offered as a fallback when the query has no other home."""
+
+    def match(self, q):
+        return q.startswith("?") or len(q) >= 3
+
+    def query(self, q):
+        term = q.lstrip("?").strip()
+        if not term:
+            return []
+        url = "https://www.google.com/search?q=" + GLib.uri_escape_string(term, "", False)
+        return [Result(f"Search the web for “{term}”",
+                       url, "web-browser-symbolic",
+                       score=-100,
+                       action=lambda u=url: subprocess.Popen(["xdg-open", u]))]
+
+
+class ActionProvider:
+    """System actions: lock, logout, reboot, shutdown."""
+
+    ACTIONS = [
+        ("lock",     "Lock the screen",       "system-lock-screen-symbolic",
+         lambda: subprocess.Popen(["loginctl", "lock-session"])),
+        ("logout",   "Sign out of WilOS",      "system-log-out-symbolic",
+         lambda: subprocess.Popen(["hyprctl", "dispatch", "exit"])),
+        ("reboot",   "Restart the computer",   "system-reboot-symbolic",
+         lambda: subprocess.Popen(["systemctl", "reboot"])),
+        ("shutdown", "Power off the computer", "system-shutdown-symbolic",
+         lambda: subprocess.Popen(["systemctl", "poweroff"])),
+    ]
+
+    def match(self, q):
+        return len(q) >= 2
+
+    def query(self, q):
+        n = q.lower()
+        return [Result(t, sub, ic, score=50, action=ac)
+                for (t, sub, ic, ac) in self.ACTIONS if n in t]
+
+
+PROVIDERS = [
+    CalcProvider(),
+    ConvertProvider(),
+    ClipboardProvider(),
+    ActionProvider(),
+    AppProvider(),
+    FileProvider(),
+    WebProvider(),
+]
+
+
+# ------------------------------------------------------------------- #
+# Helpers
+# ------------------------------------------------------------------- #
+
+def _to_clipboard(text):
+    try:
+        p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+        p.communicate(text.encode())
+    except FileNotFoundError:
+        pass
+
+
+def _cliphist_paste(num):
+    try:
+        line = f"{num}\t".encode()
+        decoded = subprocess.run(
+            ["cliphist", "decode"],
+            input=line, capture_output=True, check=False).stdout
+        if decoded:
+            p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+            p.communicate(decoded)
+    except FileNotFoundError:
+        pass
+
+
+# ------------------------------------------------------------------- #
+# UI
+# ------------------------------------------------------------------- #
+
+CSS = """
+window#wilcenter {
+    background: rgba(15, 15, 23, 0.62);
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 22px;
+    box-shadow: 0 16px 60px rgba(0, 0, 0, 0.55);
+}
+#wilcenter-input {
+    margin: 6px 8px 12px 8px;
+    padding: 14px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    color: #FFFFFF;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    border-radius: 14px;
+    font-size: 17px;
+}
+#wilcenter-input:focus {
+    border-color: rgba(124, 200, 255, 0.55);
+    box-shadow: 0 0 0 3px rgba(124, 200, 255, 0.18);
+}
+.wilcenter-row {
+    padding: 8px 14px;
+    margin: 1px 4px;
+    border-radius: 12px;
+    color: rgba(236, 238, 246, 0.92);
+}
+.wilcenter-row:selected {
+    background: rgba(124, 200, 255, 0.18);
+}
+.wilcenter-title {
+    color: #FFFFFF;
+    font-weight: 600;
+}
+.wilcenter-subtitle {
+    color: rgba(236, 238, 246, 0.55);
+    font-size: 11px;
+}
+"""
+
+
+class Window(Gtk.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Wilcenter",
+                         default_width=620, default_height=440,
+                         resizable=False, decorated=False, modal=True)
+        self.set_widget_name("wilcenter")
+        self.set_focusable(True)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL,
+                        margin_start=12, margin_end=12,
+                        margin_top=12, margin_bottom=12)
+        self.set_child(outer)
+
+        self.entry = Gtk.Entry()
+        self.entry.set_widget_name("wilcenter-input")
+        self.entry.set_placeholder_text("Search apps, files, clipboard, or type a calculation…")
+        self.entry.connect("changed", self._on_changed)
+        self.entry.connect("activate", self._on_activate)
+        outer.append(self.entry)
+
+        self.list = Gtk.ListBox()
+        self.list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.list.connect("row-activated", lambda _b, r: self._activate_row(r))
+        scroller = Gtk.ScrolledWindow()
+        scroller.set_vexpand(True)
+        scroller.set_child(self.list)
+        outer.append(scroller)
+
+        # Esc closes; arrow keys move selection; Tab/Enter activate.
+        controller = Gtk.EventControllerKey.new()
+        controller.connect("key-pressed", self._on_key)
+        self.add_controller(controller)
+
+        # Initial: show recent apps.
+        self._render([])
+
+    def _on_key(self, _ctrl, keyval, _kc, _state):
+        if keyval == Gdk.KEY_Escape:
+            self.close(); return True
+        if keyval in (Gdk.KEY_Down, Gdk.KEY_Up):
+            row = self.list.get_selected_row()
+            idx = row.get_index() if row else -1
+            n   = self._row_count()
+            if not n:
+                return True
+            new = idx + (1 if keyval == Gdk.KEY_Down else -1)
+            new = max(0, min(n - 1, new))
+            r2 = self.list.get_row_at_index(new)
+            if r2:
+                self.list.select_row(r2)
+                r2.grab_focus()
+            return True
+        return False
+
+    def _row_count(self):
+        n = 0
+        c = self.list.get_first_child()
+        while c is not None:
+            n += 1; c = c.get_next_sibling()
+        return n
+
+    def _on_changed(self, entry):
+        q = entry.get_text().strip()
+        results = []
+        for p in PROVIDERS:
+            try:
+                if p.match(q):
+                    results.extend(p.query(q))
+            except Exception:
+                continue
+        results.sort(key=lambda r: -r.score)
+        self._render(results[:MAX_RES])
+
+    def _on_activate(self, _entry):
+        row = self.list.get_selected_row() or self.list.get_row_at_index(0)
+        if row is not None:
+            self._activate_row(row)
+
+    def _activate_row(self, row):
+        if row is None:
+            return
+        try:
+            row._result.action()
+        finally:
+            self.close()
+
+    def _render(self, results):
+        for c in list(self.list):
+            self.list.remove(c)
+        for r in results:
+            row = Gtk.ListBoxRow()
+            row.add_css_class("wilcenter-row")
+            row._result = r
+            box = Gtk.Box(spacing=12, margin_start=2, margin_end=2,
+                          margin_top=2, margin_bottom=2)
+            img = Gtk.Image.new_from_icon_name(r.icon)
+            img.set_pixel_size(28)
+            box.append(img)
+            text = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                           hexpand=True)
+            t = Gtk.Label(label=r.title, xalign=0,
+                          ellipsize=Pango.EllipsizeMode.MIDDLE)
+            t.add_css_class("wilcenter-title")
+            text.append(t)
+            if r.subtitle:
+                s = Gtk.Label(label=r.subtitle, xalign=0,
+                              ellipsize=Pango.EllipsizeMode.MIDDLE)
+                s.add_css_class("wilcenter-subtitle")
+                text.append(s)
+            box.append(text)
+            row.set_child(box)
+            self.list.append(row)
+        first = self.list.get_row_at_index(0)
+        if first:
+            self.list.select_row(first)
+
+
+class Application(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_startup(self):
+        Adw.Application.do_startup(self)
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS.encode())
+        display = Gdk.Display.get_default()
+        if display:
+            Gtk.StyleContext.add_provider_for_display(
+                display, provider,
+                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+
+    def do_activate(self):
+        Window(self).present()
+
+
+if __name__ == "__main__":
+    sys.exit(Application().run(sys.argv))

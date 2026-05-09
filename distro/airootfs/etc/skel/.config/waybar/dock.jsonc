@@ -13,8 +13,9 @@
     "modules-left":   ["wlr/taskbar"],
     "modules-center": [
         "custom/finder", "custom/launcher", "custom/browser",
-        "custom/mail",   "custom/messages", "custom/music",
-        "custom/photos", "custom/timemachine", "custom/installer",
+        "custom/mail",   "custom/calendar", "custom/notes",
+        "custom/music",  "custom/photos",
+        "custom/timemachine", "custom/installer",
         "custom/terminal", "custom/sep",
         "custom/files",  "custom/trash"
     ],
@@ -32,8 +33,9 @@
     "custom/finder":   { "format": "", "tooltip": "Files",     "on-click": "nautilus" },
     "custom/launcher": { "format": "", "tooltip": "Launchpad", "on-click": "wofi --show drun" },
     "custom/browser":  { "format": "", "tooltip": "Browser",   "on-click": "firefox" },
-    "custom/mail":     { "format": "", "tooltip": "Mail",      "on-click": "xdg-open mailto:" },
-    "custom/messages": { "format": "", "tooltip": "Messages",  "on-click": "true" },
+    "custom/mail":     { "format": "", "tooltip": "Mail",      "on-click": "geary" },
+    "custom/calendar": { "format": "", "tooltip": "Calendar",  "on-click": "gnome-calendar" },
+    "custom/notes":    { "format": "", "tooltip": "Notes",     "on-click": "wilos-notes" },
     "custom/music":    { "format": "", "tooltip": "Music",     "on-click": "mpv" },
     "custom/photos":   { "format": "", "tooltip": "Photos",    "on-click": "loupe" },
     "custom/timemachine": { "format": "", "tooltip": "Time Machine", "on-click": "wilos-timemachine" },

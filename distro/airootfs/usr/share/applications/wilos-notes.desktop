@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Notes
+GenericName=Markdown notes
+Comment=Take quick notes in Markdown
+Exec=wilos-notes
+Icon=wilos-notes
+Terminal=false
+Categories=Office;TextEditor;
+Keywords=notes;markdown;writing;
+StartupNotify=true
+StartupWMClass=org.wilos.Notes

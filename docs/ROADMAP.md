@@ -60,17 +60,50 @@ we add **on top of** Arch + Linux, not about reinventing kernels.
 - [x] `wilbar` — Rust + GTK4 + gtk4-layer-shell scaffold for the
       future native top bar (clock-only v0; Waybar still ships)
 
-## v0.4 — Compositor split + ecosystem
+## v0.4 — Compositor split + ecosystem (this commit)
 
-- [ ] Wilbar reaches parity with Waybar: workspaces (Hyprland IPC),
-      taskbar (foreign-toplevel-management), tray
-      (StatusNotifierItem), audio, network, brightness, battery
-- [ ] **Wildock**: native Rust dock with magnification animation
-- [ ] **Wilcenter**: KRunner-style command palette (calc, units,
-      web search, file open, clipboard history)
-- [ ] Polished window snap layouts (FancyZones-equivalent)
+- [x] **Wilcenter** (`wilcenter`, GTK4 + libadwaita) — KRunner-style
+      command palette with provider model: calc, unit conversion
+      (length/mass/volume/temperature), clipboard history, file
+      finder ($HOME), .desktop launcher, web search, system actions
+      (lock/logout/reboot/shutdown). Bound to **Super + /**.
+- [x] **Snap layouts** (`wilos-snap`, GTK4) — fullscreen glass
+      chooser with 6 presets (Fullscreen / 50-50 split / Main+stack
+      / Thirds / Sidebar-left / Sidebar-right). Picks rearrange the
+      focused workspace via `hyprctl` move/resize. Bound to
+      **Super + Shift + S**.
+- [x] **Wildock** (Rust crate) — native bottom dock anchored via
+      gtk4-layer-shell, reads `/etc/wilos/dock.toml` for pinned
+      items, hover-lift animation. Pinned-only in this revision;
+      taskbar (foreign-toplevel-management) lands in v0.5.
+- [x] **Wilbar** modules — workspaces (Hyprland IPC over the events
+      socket), focused window title, audio (`wpctl`), battery
+      (`/sys/class/power_supply`), brightness
+      (`/sys/class/backlight`), network (`nmcli`), clock. Tray
+      (StatusNotifierItem) and taskbar still scaffold-only.
+- [x] **Notes** (`wilos-notes`, GTK4 + libadwaita) — first-party
+      markdown editor with autosave (600 ms debounce), filename
+      derived from first heading, search box, `~/Notes/` storage.
+      Bound to **Super + M**.
+- [x] **Calendar / Mail / Camera** — first-party desktop entries
+      with custom Aurora icons fronting GNOME Calendar / Geary /
+      GNOME Snapshot, so the app drawer shows "Calendar" / "Mail"
+      / "Camera" with our visual identity.
+- [x] Keybinds wired in `hyprland.conf`: Super+Space (Launchpad),
+      Super+/ (Wilcenter), Super+Shift+S (Snap layouts),
+      Super+M (Notes), Super+Ctrl+S (screenshot region).
+
+## v0.5 — Compositor parity finish line
+
+- [ ] Wilbar taskbar via `wlr-foreign-toplevel-management`
+- [ ] Wilbar tray via `org.kde.StatusNotifierItem`
+- [ ] Wilbar configurable via `/etc/wilos/wilbar.toml`
+- [ ] Wildock taskbar (live open-app icons)
+- [ ] Wildock magnification spring animation
+- [ ] Drop Waybar from the ISO once Wilbar/Wildock reach parity
 - [ ] Workspace overview gesture (3-finger swipe up)
-- [ ] First-party Mail, Calendar, Notes, Camera apps (libadwaita)
+- [ ] First real Calendar app (libadwaita + GOA accounts)
+- [ ] First real Mail app or polished Geary integration
 
 ## v0.3 — Productivity layer
 

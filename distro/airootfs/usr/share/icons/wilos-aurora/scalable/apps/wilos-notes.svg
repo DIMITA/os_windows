@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WilOS Aurora — Notes. Page with aurora bookmark and underline. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="aN" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#7CC8FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+  </defs>
+  <!-- page -->
+  <path d="M14 6 h28 a4 4 0 0 1 4 4 v44 a4 4 0 0 1 -4 4 H14 a4 4 0 0 1 -4 -4 V10 a4 4 0 0 1 4 -4 z"
+        fill="#1B1442" stroke="url(#aN)" stroke-width="1.8"/>
+  <!-- text lines -->
+  <g stroke="url(#aN)" stroke-width="1.6" stroke-linecap="round" opacity="0.85">
+    <line x1="18" y1="22" x2="38" y2="22"/>
+    <line x1="18" y1="30" x2="42" y2="30"/>
+    <line x1="18" y1="38" x2="34" y2="38"/>
+    <line x1="18" y1="46" x2="40" y2="46"/>
+  </g>
+  <!-- bookmark ribbon -->
+  <path d="M50 6 v18 l-4 -4 l-4 4 V6 z" fill="url(#aN)"/>
+</svg>

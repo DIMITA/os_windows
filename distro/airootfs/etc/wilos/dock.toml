@@ -1,0 +1,63 @@
+# /etc/wilos/dock.toml — default Wildock pinned items.
+# Override per-user at ~/.config/wildock/dock.toml.
+
+[[items]]
+label = "Files"
+icon  = "org.gnome.Nautilus"
+exec  = "nautilus"
+
+[[items]]
+label = "Launchpad"
+icon  = "view-grid-symbolic"
+exec  = "wofi --show drun"
+
+[[items]]
+label = "Browser"
+icon  = "firefox"
+exec  = "firefox"
+
+[[items]]
+label = "Mail"
+icon  = "mail-send-symbolic"
+exec  = "geary"
+
+[[items]]
+label = "Calendar"
+icon  = "x-office-calendar-symbolic"
+exec  = "gnome-calendar"
+
+[[items]]
+label = "Music"
+icon  = "audio-x-generic-symbolic"
+exec  = "mpv"
+
+[[items]]
+label = "Photos"
+icon  = "image-x-generic-symbolic"
+exec  = "loupe"
+
+[[items]]
+label = "Notes"
+icon  = "wilos-notes"
+exec  = "wilos-notes"
+
+[[items]]
+label = "Time Machine"
+icon  = "wilos-timemachine"
+exec  = "wilos-timemachine"
+
+[[items]]
+label = "Install WilOS"
+icon  = "wilos-installer"
+exec  = "wilos-installer"
+
+[[items]]
+label = "Terminal"
+icon  = "kitty"
+exec  = "kitty"
+sep_after = true
+
+[[items]]
+label = "Trash"
+icon  = "user-trash-symbolic"
+exec  = "nautilus trash:///"

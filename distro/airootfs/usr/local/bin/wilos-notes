@@ -1,0 +1,262 @@
+#!/usr/bin/env python3
+"""
+wilos-notes — first-party Notes app.
+
+Markdown files live in ~/Notes/. The UI is a two-pane Adw.Leaflet:
+sidebar of notes (sorted by mtime), editor on the right. Every
+keystroke is autosaved 600 ms after the last edit. New notes are
+named after their first non-empty line, sluggified.
+"""
+
+from __future__ import annotations
+
+import gi, os, re, datetime, sys
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk, Pango  # noqa: E402
+
+APP_ID = "org.wilos.Notes"
+NOTES  = os.path.join(os.path.expanduser("~"), "Notes")
+SAVE_DELAY_MS = 600
+
+
+def slugify(text):
+    text = text.strip().lower()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"\s+", "-", text)
+    return text[:60] or f"note-{datetime.datetime.now():%Y%m%d-%H%M%S}"
+
+
+class NotesWindow(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Notes",
+                         default_width=960, default_height=620)
+        os.makedirs(NOTES, exist_ok=True)
+
+        view = Adw.ToolbarView()
+        self.set_content(view)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle.new("Notes", ""))
+        view.add_top_bar(header)
+
+        new = Gtk.Button.new_from_icon_name("document-new-symbolic")
+        new.set_tooltip_text("New note  (Ctrl+N)")
+        new.connect("clicked", lambda *_: self._new_note())
+        header.pack_start(new)
+
+        delete = Gtk.Button.new_from_icon_name("user-trash-symbolic")
+        delete.set_tooltip_text("Delete note  (Ctrl+Delete)")
+        delete.connect("clicked", lambda *_: self._delete_current())
+        header.pack_end(delete)
+
+        # Two-pane split: notes list on the left, editor on the right.
+        split = Adw.OverlaySplitView()
+        split.set_show_sidebar(True)
+        split.set_min_sidebar_width(220)
+        split.set_max_sidebar_width(360)
+        view.set_content(split)
+
+        # Sidebar
+        sidebar_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        sidebar_box.add_css_class("background")
+        split.set_sidebar(sidebar_box)
+
+        search = Gtk.SearchEntry()
+        search.set_placeholder_text("Search notes")
+        search.set_margin_top(8)
+        search.set_margin_start(8)
+        search.set_margin_end(8)
+        search.set_margin_bottom(8)
+        search.connect("search-changed", lambda e: self._reload(e.get_text()))
+        sidebar_box.append(search)
+
+        scroll = Gtk.ScrolledWindow(); scroll.set_vexpand(True)
+        sidebar_box.append(scroll)
+        self.list = Gtk.ListBox()
+        self.list.add_css_class("navigation-sidebar")
+        self.list.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.list.connect("row-selected", self._on_select)
+        scroll.set_child(self.list)
+
+        # Editor
+        editor_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        split.set_content(editor_box)
+
+        editor_scroll = Gtk.ScrolledWindow(); editor_scroll.set_vexpand(True)
+        editor_box.append(editor_scroll)
+
+        self.buffer = Gtk.TextBuffer()
+        self.buffer.connect("changed", self._on_change)
+        editor = Gtk.TextView.new_with_buffer(self.buffer)
+        editor.set_wrap_mode(Gtk.WrapMode.WORD)
+        editor.set_top_margin(24); editor.set_bottom_margin(24)
+        editor.set_left_margin(40); editor.set_right_margin(40)
+        editor.set_pixels_above_lines(2)
+        editor.set_monospace(False)
+        font = Pango.FontDescription.from_string("Source Serif 4 14")
+        editor.set_extra_menu(None)
+        editor.override_font(font) if hasattr(editor, "override_font") else None
+        self.editor = editor
+        editor_scroll.set_child(editor)
+
+        self.status = Gtk.Label(xalign=1.0)
+        self.status.add_css_class("dim-label")
+        self.status.add_css_class("caption")
+        self.status.set_margin_end(16)
+        self.status.set_margin_bottom(6)
+        editor_box.append(self.status)
+
+        self._save_source = 0
+        self._current = None
+
+        # Keyboard shortcuts.
+        ctrl = Gtk.ShortcutController.new()
+        ctrl.set_scope(Gtk.ShortcutScope.GLOBAL)
+        ctrl.add_shortcut(Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Control>n"),
+            Gtk.CallbackAction.new(lambda *_: self._new_note() or True)))
+        ctrl.add_shortcut(Gtk.Shortcut.new(
+            Gtk.ShortcutTrigger.parse_string("<Control>Delete"),
+            Gtk.CallbackAction.new(lambda *_: self._delete_current() or True)))
+        self.add_controller(ctrl)
+
+        self._reload()
+
+    # ---- file ops -------------------------------------------------- #
+
+    def _list_notes(self, needle=""):
+        n = needle.lower()
+        try:
+            files = [f for f in os.listdir(NOTES) if f.endswith(".md")]
+        except FileNotFoundError:
+            return []
+        out = []
+        for f in files:
+            full = os.path.join(NOTES, f)
+            try:
+                stat = os.stat(full)
+            except OSError:
+                continue
+            try:
+                first = next((ln.strip() for ln in open(full).read(2048).splitlines()
+                              if ln.strip()), "(empty)")
+            except OSError:
+                first = "(unreadable)"
+            if n and n not in first.lower() and n not in f.lower():
+                continue
+            out.append((stat.st_mtime, full, first))
+        out.sort(reverse=True)
+        return out
+
+    def _reload(self, needle=""):
+        for c in list(self.list):
+            self.list.remove(c)
+        for mtime, path, first in self._list_notes(needle):
+            row = Gtk.ListBoxRow()
+            row._path = path
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2,
+                          margin_start=14, margin_end=14,
+                          margin_top=10, margin_bottom=10)
+            t = Gtk.Label(label=first[:60], xalign=0,
+                          ellipsize=Pango.EllipsizeMode.END)
+            t.add_css_class("title-4")
+            box.append(t)
+            sub = datetime.datetime.fromtimestamp(mtime).strftime("%a %d %b, %H:%M")
+            s = Gtk.Label(label=sub, xalign=0)
+            s.add_css_class("caption")
+            s.add_css_class("dim-label")
+            box.append(s)
+            row.set_child(box)
+            self.list.append(row)
+        first_row = self.list.get_row_at_index(0)
+        if first_row:
+            self.list.select_row(first_row)
+        elif self._current is None:
+            self._new_note()
+
+    def _on_select(self, _list, row):
+        if row is None or getattr(row, "_path", None) is None:
+            return
+        if self._save_source:
+            GLib.source_remove(self._save_source); self._save_source = 0
+            self._save_now()
+        self._current = row._path
+        try:
+            self.buffer.set_text(open(self._current).read())
+        except OSError:
+            self.buffer.set_text("")
+        self.status.set_text(f"Loaded {os.path.basename(self._current)}")
+
+    def _new_note(self):
+        if self._save_source:
+            GLib.source_remove(self._save_source); self._save_source = 0
+            self._save_now()
+        path = os.path.join(NOTES, f"new-{datetime.datetime.now():%Y%m%d-%H%M%S}.md")
+        try:
+            open(path, "w").close()
+        except OSError:
+            return
+        self._current = path
+        self.buffer.set_text("# New note\n\n")
+        self._reload()
+        self.editor.grab_focus()
+
+    def _delete_current(self):
+        if not self._current or not os.path.exists(self._current):
+            return
+        try:
+            os.unlink(self._current)
+        except OSError:
+            return
+        self._current = None
+        self.buffer.set_text("")
+        self._reload()
+
+    # ---- autosave -------------------------------------------------- #
+
+    def _on_change(self, *_):
+        if self._save_source:
+            GLib.source_remove(self._save_source)
+        self._save_source = GLib.timeout_add(SAVE_DELAY_MS, self._save_now)
+        self.status.set_text("Saving…")
+
+    def _save_now(self):
+        self._save_source = 0
+        if not self._current:
+            return False
+        text = self.buffer.get_text(self.buffer.get_start_iter(),
+                                     self.buffer.get_end_iter(), False)
+
+        # Rename the file based on first heading/line.
+        first_line = next((l for l in text.splitlines() if l.strip()), "")
+        first_line = first_line.lstrip("#").strip()
+        if first_line:
+            target = os.path.join(NOTES, slugify(first_line) + ".md")
+            if target != self._current and not os.path.exists(target):
+                try:
+                    os.rename(self._current, target)
+                    self._current = target
+                except OSError:
+                    pass
+
+        try:
+            with open(self._current, "w") as fp:
+                fp.write(text)
+            self.status.set_text("Saved " + os.path.basename(self._current))
+        except OSError as e:
+            self.status.set_text(f"Save failed: {e}")
+        return False
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+
+    def do_activate(self):
+        NotesWindow(self).present()
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))
