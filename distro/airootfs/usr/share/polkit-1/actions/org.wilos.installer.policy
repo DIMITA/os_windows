@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC
+ "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+    <vendor>WilOS</vendor>
+    <vendor_url>https://wilos.example/</vendor_url>
+    <icon_name>wilos</icon_name>
+
+    <action id="org.wilos.installer.run">
+        <description>Install WilOS to a disk</description>
+        <message>Authentication is required to install WilOS to a disk.</message>
+        <defaults>
+            <allow_any>auth_admin_keep</allow_any>
+            <allow_inactive>auth_admin_keep</allow_inactive>
+            <allow_active>auth_admin_keep</allow_active>
+        </defaults>
+        <annotate key="org.freedesktop.policykit.exec.path">/usr/local/bin/wilos-install</annotate>
+    </action>
+</policyconfig>

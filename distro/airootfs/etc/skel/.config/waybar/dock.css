@@ -22,7 +22,7 @@ window#waybar {
 
 #taskbar button,
 #custom-finder, #custom-launcher, #custom-browser, #custom-mail,
-#custom-messages, #custom-music, #custom-photos, #custom-settings,
+#custom-messages, #custom-music, #custom-photos, #custom-installer,
 #custom-terminal, #custom-files, #custom-trash {
     color: #ECEEF6;
     padding: 0 10px;
@@ -34,7 +34,7 @@ window#waybar {
 #taskbar button:hover,
 #custom-finder:hover, #custom-launcher:hover, #custom-browser:hover,
 #custom-mail:hover, #custom-messages:hover, #custom-music:hover,
-#custom-photos:hover, #custom-settings:hover, #custom-terminal:hover,
+#custom-photos:hover, #custom-installer:hover, #custom-terminal:hover,
 #custom-files:hover, #custom-trash:hover {
     background: rgba(255, 255, 255, 0.10);
     box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
@@ -43,12 +43,13 @@ window#waybar {
     margin-bottom: 8px;
 }
 
-#custom-launcher { color: #B198FF; }
-#custom-browser  { color: #7CC8FF; }
-#custom-mail     { color: #9BE3C0; }
-#custom-music    { color: #F4B0E5; }
-#custom-photos   { color: #FFD580; }
-#custom-trash    { color: rgba(255, 138, 138, 0.85); }
+#custom-launcher  { color: #B198FF; }
+#custom-browser   { color: #7CC8FF; }
+#custom-mail      { color: #9BE3C0; }
+#custom-music     { color: #F4B0E5; }
+#custom-photos    { color: #FFD580; }
+#custom-installer { color: #B198FF; }
+#custom-trash     { color: rgba(255, 138, 138, 0.85); }
 
 #custom-sep {
     color: rgba(255, 255, 255, 0.18);

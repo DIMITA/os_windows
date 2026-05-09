@@ -86,3 +86,10 @@ sits in the shell, the design system, and the install experience.
 | Boot menu (UEFI)                 | `distro/efiboot/loader/`                                   |
 | Boot menu (GRUB)                 | `distro/grub/grub.cfg`                                     |
 | Boot menu (BIOS / syslinux)      | `distro/syslinux/syslinux.cfg`                             |
+| Plymouth boot splash             | `distro/airootfs/usr/share/plymouth/themes/wilos/`         |
+| GTK4 / libadwaita theme          | `distro/airootfs/etc/skel/.config/gtk-4.0/`                |
+| GTK3 fallback theme              | `distro/airootfs/etc/skel/.config/gtk-3.0/`                |
+| WilOS logo / branding            | `distro/airootfs/usr/share/wilos-branding/`                |
+| Graphical installer (GTK4)       | `distro/airootfs/usr/local/bin/wilos-installer`            |
+| PolicyKit policy for installer   | `distro/airootfs/usr/share/polkit-1/actions/`              |
+| Installer desktop entry          | `distro/airootfs/usr/share/applications/`                  |

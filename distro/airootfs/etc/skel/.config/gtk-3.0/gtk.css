@@ -1,0 +1,38 @@
+/* WilOS Aurora — GTK3 fallback. We only theme the few legacy apps
+   that still ship GTK3 (nm-connection-editor, blueman, pavucontrol).
+   Adwaita-dark stays the base; we just retint it. */
+
+@define-color theme_selected_bg_color #7CC8FF;
+@define-color theme_selected_fg_color #0F0F17;
+@define-color theme_bg_color          #14131F;
+@define-color theme_fg_color          #ECEEF6;
+@define-color theme_base_color        #1A1928;
+@define-color theme_text_color        #ECEEF6;
+
+@define-color insensitive_bg_color    #14131F;
+@define-color insensitive_fg_color    rgba(236, 238, 246, 0.5);
+
+window, .background {
+    background-color: @theme_bg_color;
+    color: @theme_fg_color;
+}
+
+button {
+    border-radius: 10px;
+}
+button.suggested-action {
+    background: linear-gradient(135deg, #7CC8FF, #B198FF);
+    color: #0F0F17;
+    border: none;
+}
+
+entry {
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    color: @theme_fg_color;
+}
+entry:focus {
+    box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.55);
+}
+
+selection { background-color: rgba(124, 200, 255, 0.35); color: #FFFFFF; }

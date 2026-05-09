@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WilOS aurora glyph.
+  A soft "W" bowl traced by an aurora gradient on a glass disc.
+  Rendered in pure SVG so it scales to every surface (Plymouth,
+  greeter, dock launcher, About panel, fastfetch).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <radialGradient id="disc" cx="50%" cy="38%" r="65%">
+      <stop offset="0%"  stop-color="#1B1442"/>
+      <stop offset="60%" stop-color="#100B2A"/>
+      <stop offset="100%" stop-color="#06030C"/>
+    </radialGradient>
+
+    <linearGradient id="aurora" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%"   stop-color="#7CC8FF"/>
+      <stop offset="55%"  stop-color="#B198FF"/>
+      <stop offset="100%" stop-color="#FF8AC8"/>
+    </linearGradient>
+
+    <linearGradient id="rim" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%"   stop-color="#FFFFFF" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0.0"/>
+    </linearGradient>
+
+    <filter id="soft-glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="3" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Glass disc -->
+  <circle cx="128" cy="128" r="120" fill="url(#disc)"/>
+  <!-- Top inner highlight (rim light) -->
+  <circle cx="128" cy="128" r="120" fill="url(#rim)"/>
+  <!-- Hairline border -->
+  <circle cx="128" cy="128" r="119.5" fill="none"
+          stroke="#FFFFFF" stroke-opacity="0.10" stroke-width="1"/>
+
+  <!-- Stylised W traced as a smooth aurora ribbon. -->
+  <path d="
+        M 60 88
+        L 90 168
+        L 110 120
+        L 128 168
+        L 146 120
+        L 166 168
+        L 196 88
+      "
+        fill="none"
+        stroke="url(#aurora)"
+        stroke-width="14"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        filter="url(#soft-glow)"/>
+</svg>

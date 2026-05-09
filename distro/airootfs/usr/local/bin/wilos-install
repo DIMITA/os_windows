@@ -135,10 +135,25 @@ configure() {
     local hostname="$1" username="$2" password="$3" locale="$4" tz="$5"
     genfstab -U /mnt >> /mnt/etc/fstab
 
+    # Carry the Plymouth theme + WilOS branding into the installed root.
+    install -Dm644 /usr/share/plymouth/themes/wilos/wilos.plymouth \
+        /mnt/usr/share/plymouth/themes/wilos/wilos.plymouth
+    install -Dm644 /usr/share/plymouth/themes/wilos/wilos.script \
+        /mnt/usr/share/plymouth/themes/wilos/wilos.script
+    install -Dm644 /usr/share/plymouth/themes/wilos/wilos-logo.png \
+        /mnt/usr/share/plymouth/themes/wilos/wilos-logo.png
+    install -Dm644 /etc/plymouth/plymouthd.conf /mnt/etc/plymouth/plymouthd.conf
+    cp -a /usr/share/wilos-branding /mnt/usr/share/
+
     arch-chroot /mnt /bin/bash <<EOF
 set -e
 ln -sf /usr/share/zoneinfo/${tz} /etc/localtime
 hwclock --systohc
+
+# Insert plymouth into the HOOKS line so the boot splash starts early.
+sed -i -E 's/^(HOOKS=\\(base udev)( autodetect)/\\1 plymouth\\2/' /etc/mkinitcpio.conf
+mkinitcpio -P >/dev/null
+plymouth-set-default-theme wilos >/dev/null 2>&1 || true
 sed -i "s/^#${locale}/${locale}/" /etc/locale.gen
 locale-gen >/dev/null
 echo "LANG=${locale}" > /etc/locale.conf
@@ -179,39 +194,95 @@ ENTRY
 EOF
 }
 
+load_config() {
+    # Source a shell-format config: DISK=, HOSTNAME=, USERNAME=, PASSWORD=,
+    # LOCALE=, TZ=, ASSUME_YES=. The graphical installer writes one of these
+    # to a temp file then invokes us with --config <file>.
+    local file="$1"
+    [[ -r "$file" ]] || { echo -e "${RED}Config not readable: $file${RST}"; exit 1; }
+    # shellcheck disable=SC1090
+    source "$file"
+    : "${DISK:?missing DISK in config}"
+    : "${HOSTNAME:?missing HOSTNAME in config}"
+    : "${USERNAME:?missing USERNAME in config}"
+    : "${PASSWORD:?missing PASSWORD in config}"
+    : "${LOCALE:=en_US.UTF-8 UTF-8}"
+    : "${TZ:=Europe/Paris}"
+    : "${ASSUME_YES:=0}"
+}
+
 main() {
     require_root
+
+    local CONFIG=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --config) CONFIG="$2"; shift 2 ;;
+            -h|--help)
+                cat <<USAGE
+wilos-install — install WilOS to a disk.
+
+Usage:
+    wilos-install                  interactive
+    wilos-install --config FILE    non-interactive (used by the GUI)
+
+Config file (shell format):
+    DISK=sda
+    HOSTNAME=wilos
+    USERNAME=wil
+    PASSWORD=secret
+    LOCALE='en_US.UTF-8 UTF-8'
+    TZ=Europe/Paris
+    ASSUME_YES=1
+USAGE
+                exit 0 ;;
+            *) echo "Unknown argument: $1"; exit 1 ;;
+        esac
+    done
+
     banner
 
-    echo "Detected disks:"
-    list_disks
-    echo
+    if [[ -n "$CONFIG" ]]; then
+        load_config "$CONFIG"
+    else
+        echo "Detected disks:"
+        list_disks
+        echo
 
-    local default_disk live
-    live="$(live_disk | sed 's|^/dev/||')"
-    default_disk="$(lsblk -dno NAME | grep -v "^$live$" | head -n1)"
+        local default_disk live
+        live="$(live_disk | sed 's|^/dev/||')"
+        default_disk="$(lsblk -dno NAME | grep -v "^$live$" | head -n1)"
 
-    DISK="$(ask "Target disk (will be ERASED)" "$default_disk")"
+        DISK="$(ask "Target disk (will be ERASED)" "$default_disk")"
+        HOSTNAME="$(ask 'Hostname'           'wilos')"
+        USERNAME="$(ask 'Primary user name'  'wil')"
+        while :; do
+            read -rsp "$(echo -e "${BLU}?${RST} Password for ${USERNAME}: ")" PASSWORD; echo
+            read -rsp "$(echo -e "${BLU}?${RST} Repeat:                 ")" PASSWORD2; echo
+            [[ "$PASSWORD" == "$PASSWORD2" && -n "$PASSWORD" ]] && break
+            echo -e "${YEL}Passwords don't match or are empty. Try again.${RST}"
+        done
+        LOCALE="$(ask 'Locale'   'en_US.UTF-8 UTF-8')"
+        TZ="$(ask     'Timezone' 'Europe/Paris')"
+        ASSUME_YES=0
+    fi
+
     if [[ -z "$DISK" || ! -b "/dev/$DISK" ]]; then
         echo -e "${RED}Not a block device: /dev/$DISK${RST}"; exit 1
     fi
-    if [[ "$DISK" == "$live" ]]; then
+    local live_only
+    live_only="$(live_disk | sed 's|^/dev/||')"
+    if [[ "$DISK" == "$live_only" ]]; then
         echo -e "${RED}Refusing to install onto the live disk.${RST}"
         exit 1
     fi
 
-    HOSTNAME="$(ask 'Hostname'           'wilos')"
-    USERNAME="$(ask 'Primary user name'  'wil')"
-    while :; do
-        read -rsp "$(echo -e "${BLU}?${RST} Password for ${USERNAME}: ")" PASSWORD; echo
-        read -rsp "$(echo -e "${BLU}?${RST} Repeat:                 ")" PASSWORD2; echo
-        [[ "$PASSWORD" == "$PASSWORD2" && -n "$PASSWORD" ]] && break
-        echo -e "${YEL}Passwords don't match or are empty. Try again.${RST}"
-    done
-    LOCALE="$(ask 'Locale'   'en_US.UTF-8 UTF-8')"
-    TZ="$(ask     'Timezone' 'Europe/Paris')"
-
-    confirm_wipe "$DISK"
+    if [[ "$ASSUME_YES" != "1" ]]; then
+        confirm_wipe "$DISK"
+    else
+        echo -e "${YEL}--config supplied with ASSUME_YES=1; skipping interactive confirmation.${RST}"
+        echo -e "${YEL}About to ERASE /dev/${DISK}${RST}"
+    fi
 
     target_paths "$DISK"
     partition "$DISK"
@@ -222,6 +293,11 @@ main() {
 
     sync
     echo
+    if [[ "$ASSUME_YES" == "1" ]]; then
+        echo -e "${GRN}WilOS installed.${RST}"
+        umount -R /mnt
+        exit 0
+    fi
     echo -e "${GRN}WilOS installed.${RST} Reboot now? [Y/n]"
     read -r r
     if [[ ! "$r" =~ ^[Nn]$ ]]; then

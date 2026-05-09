@@ -22,6 +22,13 @@ syslinux
 isolinux
 edk2-shell
 memtest86+-efi
+plymouth
+
+# Graphical installer dependencies
+python
+python-gobject
+gtk4
+libadwaita
 
 # File systems & disks
 btrfs-progs

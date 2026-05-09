@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Install WilOS
+GenericName=Install WilOS to disk
+Comment=Install WilOS Aurora to a disk on this computer
+Exec=wilos-installer
+Icon=wilos
+Terminal=false
+Categories=System;Settings;
+Keywords=install;system;setup;
+StartupNotify=true
+StartupWMClass=org.wilos.Installer

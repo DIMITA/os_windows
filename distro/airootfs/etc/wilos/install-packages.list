@@ -5,6 +5,11 @@ linux-firmware
 linux-headers
 intel-ucode
 amd-ucode
+plymouth
+python
+python-gobject
+gtk4
+libadwaita
 btrfs-progs
 networkmanager
 sudo

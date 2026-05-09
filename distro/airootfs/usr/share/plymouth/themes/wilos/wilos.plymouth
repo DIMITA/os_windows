@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=WilOS
+Description=Aurora boot splash for WilOS
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/wilos
+ScriptFile=/usr/share/plymouth/themes/wilos/wilos.script

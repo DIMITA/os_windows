@@ -1,20 +1,44 @@
 #!/usr/bin/env bash
-# wilos-firstrun — runs once on the first interactive login of the
-# live session. Currently just shows the welcome notification once
-# the user has reached the desktop.
+# wilos-firstrun — runs once on the first interactive login.
+# Applies user-level Aurora defaults (icon theme, cursor, fonts) via
+# gsettings, then shows the welcome notification.
 set -eu
 
 mark="$HOME/.config/wilos-firstrun-done"
 [[ -f "$mark" ]] && exit 0
 
-# Wait for the notification daemon to be alive.
+apply_gsettings() {
+    command -v gsettings >/dev/null || return 0
+    local I="org.gnome.desktop.interface"
+    gsettings set "$I" color-scheme           prefer-dark
+    gsettings set "$I" gtk-theme              Adwaita-dark
+    gsettings set "$I" icon-theme             Papirus-Dark
+    gsettings set "$I" cursor-theme           Adwaita
+    gsettings set "$I" cursor-size            24
+    gsettings set "$I" font-name              "Inter 11"
+    gsettings set "$I" document-font-name     "Inter 11"
+    gsettings set "$I" monospace-font-name    "JetBrainsMono Nerd Font 11"
+    gsettings set "$I" enable-animations      true
+    gsettings set "$I" font-antialiasing      grayscale
+    gsettings set "$I" font-hinting           slight
+    gsettings set "$I" clock-format           24h
+    gsettings set "$I" show-battery-percentage true
+    # macOS-leaning window controls: traffic lights on the LEFT.
+    gsettings set "$I" gtk-decoration-layout  "close,minimize,maximize:"
+}
+
+apply_gsettings
+
+# Welcome notification once the desktop is up.
 for _ in $(seq 1 20); do
-    if pgrep -x mako >/dev/null; then break; fi
+    pgrep -x mako >/dev/null && break
     sleep 0.5
 done
 
-notify-send -i wilos -u normal "Welcome to WilOS Aurora" \
-    "Press Super + Space to launch apps. Press Super + Return for a terminal. Run 'wilos-install' from a terminal to install WilOS to disk."
+if command -v notify-send >/dev/null; then
+    notify-send -i wilos -u normal "Welcome to WilOS Aurora" \
+        "Press Super + Space to launch apps. Press Super + Return for a terminal. To install WilOS to disk, open the Installer from the dock."
+fi
 
 mkdir -p "$(dirname "$mark")"
 touch "$mark"

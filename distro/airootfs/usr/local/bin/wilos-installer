@@ -1,0 +1,563 @@
+#!/usr/bin/env python3
+"""
+wilos-installer — graphical front-end for the WilOS installer.
+
+Drives a wizard through Welcome → Disk → User → Locale → Confirm →
+Progress → Done, then writes a config file and runs `wilos-install
+--config` under pkexec. Uses GTK4 + libadwaita so it inherits the
+Aurora theme defined in distro/airootfs/etc/skel/.config/gtk-4.0/.
+"""
+
+import gi, json, os, shutil, subprocess, sys, tempfile, threading, time
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, GLib, GObject, Gtk, Gio, Pango  # noqa: E402
+
+APP_ID  = "org.wilos.Installer"
+TITLE   = "Install WilOS"
+LOGO    = "/usr/share/wilos-branding/wilos-logo-256.png"
+INSTALL = "/usr/local/bin/wilos-install"
+
+
+# ---- helpers --------------------------------------------------------- #
+
+def list_block_devices():
+    """Return a list of dicts {name, size, model, removable, is_live}."""
+    out = subprocess.check_output(
+        ["lsblk", "-bdJno", "NAME,SIZE,MODEL,RM,TRAN,TYPE"], text=True
+    )
+    data = json.loads(out)
+    live_root = subprocess.check_output(
+        ["findmnt", "-no", "SOURCE", "/"], text=True
+    ).strip()
+    # Strip partition suffix to get the parent disk name.
+    live_disk = live_root.lstrip("/dev/").rstrip("0123456789").rstrip("p")
+
+    devices = []
+    for d in data.get("blockdevices", []):
+        if d.get("type") != "disk":
+            continue
+        if d["name"].startswith("loop") or d["name"].startswith("zram"):
+            continue
+        size_gib = d["size"] / (1024 ** 3)
+        devices.append({
+            "name":      d["name"],
+            "size":      f"{size_gib:.1f} GiB",
+            "size_b":    d["size"],
+            "model":     (d.get("model") or "").strip() or "(no model)",
+            "removable": bool(int(d.get("rm") or 0)),
+            "tran":      d.get("tran") or "",
+            "is_live":   d["name"] == live_disk,
+        })
+    return devices
+
+
+def list_timezones():
+    base = "/usr/share/zoneinfo"
+    out  = []
+    if not os.path.isdir(base):
+        return ["Europe/Paris", "Europe/London", "America/New_York", "UTC"]
+    for region in sorted(os.listdir(base)):
+        rpath = os.path.join(base, region)
+        if not os.path.isdir(rpath):
+            continue
+        for city in sorted(os.listdir(rpath)):
+            cpath = os.path.join(rpath, city)
+            if os.path.isfile(cpath):
+                out.append(f"{region}/{city}")
+    return out
+
+
+# ---- pages ----------------------------------------------------------- #
+
+class WelcomePage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=20, margin_top=64, margin_bottom=24,
+                         margin_start=48, margin_end=48,
+                         halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        if os.path.exists(LOGO):
+            img = Gtk.Image.new_from_file(LOGO)
+            img.set_pixel_size(160)
+            self.append(img)
+        title = Gtk.Label(label="Install WilOS Aurora")
+        title.add_css_class("title-1")
+        self.append(title)
+        sub = Gtk.Label(label="Light, made personal.")
+        sub.add_css_class("title-4")
+        sub.add_css_class("dim-label")
+        self.append(sub)
+        body = Gtk.Label(
+            label=("This wizard will install WilOS to a disk you choose. "
+                   "Your existing data on that disk will be erased. "
+                   "We will ask for confirmation before any change is "
+                   "written.\n\n"
+                   "Make sure your laptop is plugged in and you have "
+                   "an internet connection."),
+            wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=52)
+        body.set_margin_top(8)
+        self.append(body)
+
+
+class DiskPage(Gtk.Box):
+    __gsignals__ = {
+        "selection-changed": (GObject.SignalFlags.RUN_FIRST, None, (str,)),
+    }
+
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=12, margin_top=24, margin_bottom=12,
+                         margin_start=48, margin_end=48)
+        self.append(_heading("Choose a disk",
+                             "WilOS will erase the selected disk and install "
+                             "itself there. Removable disks (USB sticks) and "
+                             "the disk hosting the live session are excluded."))
+
+        self.list_box = Gtk.ListBox()
+        self.list_box.set_selection_mode(Gtk.SelectionMode.SINGLE)
+        self.list_box.add_css_class("boxed-list")
+        self.list_box.connect("row-selected", self._on_row_selected)
+        self.append(self.list_box)
+
+        self.refresh()
+
+    def refresh(self):
+        for child in list(self.list_box):
+            self.list_box.remove(child)
+        for d in list_block_devices():
+            row = Adw.ActionRow()
+            row.set_title(f"/dev/{d['name']}  •  {d['size']}")
+            row.set_subtitle(f"{d['model']}  •  {d['tran'].upper() or 'unknown'}")
+            row._dev = d
+            if d["is_live"]:
+                row.set_sensitive(False)
+                row.add_suffix(_pill("Live"))
+            elif d["removable"]:
+                row.set_sensitive(False)
+                row.add_suffix(_pill("Removable"))
+            self.list_box.append(row)
+
+    def _on_row_selected(self, _box, row):
+        self.emit("selection-changed", row._dev["name"] if row else "")
+
+    def selected(self):
+        row = self.list_box.get_selected_row()
+        return row._dev["name"] if row else None
+
+
+class UserPage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=12, margin_top=24, margin_bottom=12,
+                         margin_start=48, margin_end=48)
+        self.append(_heading("Create your account",
+                             "We do not ask for any personal data. The "
+                             "account stays on your machine."))
+
+        group = Adw.PreferencesGroup()
+        self.append(group)
+
+        self.host = Adw.EntryRow(title="Computer name")
+        self.host.set_text("wilos")
+        group.add(self.host)
+
+        self.user = Adw.EntryRow(title="Username")
+        self.user.set_text("wil")
+        group.add(self.user)
+
+        self.pw1 = Adw.PasswordEntryRow(title="Password")
+        group.add(self.pw1)
+
+        self.pw2 = Adw.PasswordEntryRow(title="Confirm password")
+        group.add(self.pw2)
+
+        self.error = Gtk.Label()
+        self.error.add_css_class("error")
+        self.error.set_visible(False)
+        self.append(self.error)
+
+    def values(self):
+        return (self.host.get_text().strip(),
+                self.user.get_text().strip(),
+                self.pw1.get_text(),
+                self.pw2.get_text())
+
+    def validate(self):
+        host, user, p1, p2 = self.values()
+        if not host or not host.replace("-", "").isalnum():
+            return self._err("Computer name must be alphanumeric.")
+        if not user or not user.islower() or not user.isalnum():
+            return self._err("Username must be lowercase letters and digits.")
+        if not p1 or len(p1) < 4:
+            return self._err("Password must be at least 4 characters.")
+        if p1 != p2:
+            return self._err("Passwords do not match.")
+        self.error.set_visible(False)
+        return True
+
+    def _err(self, msg):
+        self.error.set_label(msg)
+        self.error.set_visible(True)
+        return False
+
+
+class LocalePage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=12, margin_top=24, margin_bottom=12,
+                         margin_start=48, margin_end=48)
+        self.append(_heading("Region & language",
+                             "These can be changed later in Settings."))
+
+        group = Adw.PreferencesGroup()
+        self.append(group)
+
+        locales = ["en_US.UTF-8 UTF-8", "en_GB.UTF-8 UTF-8",
+                   "fr_FR.UTF-8 UTF-8", "de_DE.UTF-8 UTF-8",
+                   "es_ES.UTF-8 UTF-8", "it_IT.UTF-8 UTF-8",
+                   "pt_PT.UTF-8 UTF-8", "ja_JP.UTF-8 UTF-8",
+                   "zh_CN.UTF-8 UTF-8"]
+        self.locale = Adw.ComboRow(title="Locale")
+        self.locale.set_model(Gtk.StringList.new(locales))
+        group.add(self.locale)
+
+        timezones = list_timezones()
+        self.tz = Adw.ComboRow(title="Time zone")
+        self.tz.set_model(Gtk.StringList.new(timezones))
+        try:
+            idx = timezones.index("Europe/Paris")
+            self.tz.set_selected(idx)
+        except ValueError:
+            pass
+        group.add(self.tz)
+
+
+class ConfirmPage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=12, margin_top=24, margin_bottom=12,
+                         margin_start=48, margin_end=48)
+        self.append(_heading("Ready to install",
+                             "Review the summary. Nothing has been written "
+                             "to disk yet. Pressing Install starts the "
+                             "installation."))
+        self.summary = Gtk.Label(xalign=0, wrap=True,
+                                 wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.summary.add_css_class("monospace")
+        card = Gtk.Frame()
+        card.set_child(self.summary)
+        card.set_margin_top(8)
+        self.append(card)
+
+        warn = Adw.PreferencesGroup()
+        row  = Adw.ActionRow(title="Erase disk")
+        row.set_subtitle("All existing data on the chosen disk will be lost.")
+        row.add_prefix(Gtk.Image.new_from_icon_name("dialog-warning-symbolic"))
+        warn.add(row)
+        self.append(warn)
+
+    def update(self, disk, host, user, locale, tz):
+        self.summary.set_label(
+            f"  Disk        /dev/{disk}\n"
+            f"  Hostname    {host}\n"
+            f"  User        {user}\n"
+            f"  Locale      {locale}\n"
+            f"  Time zone   {tz}\n"
+        )
+
+
+class ProgressPage(Gtk.Box):
+    def __init__(self):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=16, margin_top=64, margin_bottom=24,
+                         margin_start=48, margin_end=48,
+                         valign=Gtk.Align.CENTER)
+        self.spinner = Adw.Spinner()
+        self.spinner.set_size_request(64, 64)
+        self.append(self.spinner)
+
+        self.label = Gtk.Label(label="Preparing…")
+        self.label.add_css_class("title-3")
+        self.append(self.label)
+
+        self.detail = Gtk.Label(label="", wrap=True,
+                                wrap_mode=Pango.WrapMode.WORD_CHAR,
+                                max_width_chars=80)
+        self.detail.add_css_class("dim-label")
+        self.detail.add_css_class("monospace")
+        self.append(self.detail)
+
+    def set_status(self, label, detail=""):
+        self.label.set_label(label)
+        if detail:
+            # Show only the last line of detail to keep it tight.
+            self.detail.set_label(detail.splitlines()[-1] if detail else "")
+
+
+class DonePage(Gtk.Box):
+    def __init__(self, on_reboot):
+        super().__init__(orientation=Gtk.Orientation.VERTICAL,
+                         spacing=20, margin_top=64,
+                         halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        if os.path.exists(LOGO):
+            img = Gtk.Image.new_from_file(LOGO)
+            img.set_pixel_size(128)
+            self.append(img)
+        ok = Gtk.Label(label="WilOS is installed.")
+        ok.add_css_class("title-1")
+        self.append(ok)
+        sub = Gtk.Label(label="Remove the installation media and reboot.")
+        sub.add_css_class("dim-label")
+        self.append(sub)
+
+        btns = Gtk.Box(spacing=12, margin_top=20, halign=Gtk.Align.CENTER)
+        self.append(btns)
+        reboot = Gtk.Button.new_with_label("Reboot now")
+        reboot.add_css_class("suggested-action")
+        reboot.add_css_class("pill")
+        reboot.connect("clicked", lambda *_: on_reboot())
+        btns.append(reboot)
+
+
+# ---- small reusable widgets ----------------------------------------- #
+
+def _heading(title, subtitle=None):
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+    h = Gtk.Label(label=title, xalign=0)
+    h.add_css_class("title-2")
+    box.append(h)
+    if subtitle:
+        s = Gtk.Label(label=subtitle, xalign=0, wrap=True,
+                      wrap_mode=Pango.WrapMode.WORD_CHAR,
+                      max_width_chars=72)
+        s.add_css_class("dim-label")
+        box.append(s)
+    return box
+
+
+def _pill(text):
+    lbl = Gtk.Label(label=text)
+    lbl.add_css_class("caption")
+    lbl.add_css_class("dim-label")
+    box = Gtk.Frame()
+    box.set_child(lbl)
+    box.add_css_class("card")
+    box.set_margin_top(6)
+    box.set_margin_bottom(6)
+    box.set_margin_start(8)
+    box.set_margin_end(8)
+    return box
+
+
+# ---- application ---------------------------------------------------- #
+
+class InstallerApp(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID,
+                         flags=Gio.ApplicationFlags.DEFAULT_FLAGS)
+        self.disk = ""
+        self.connect("activate", self._on_activate)
+
+    def _on_activate(self, *_):
+        if shutil.which(INSTALL) is None:
+            self._fatal(f"{INSTALL} not found.\n"
+                        "wilos-installer must run on a WilOS live ISO.")
+            return
+
+        self.win = Adw.ApplicationWindow(application=self,
+                                         title=TITLE,
+                                         default_width=820,
+                                         default_height=560)
+        toolview = Adw.ToolbarView()
+        self.win.set_content(toolview)
+
+        header = Adw.HeaderBar()
+        header.set_title_widget(Adw.WindowTitle.new("WilOS Installer", ""))
+        toolview.add_top_bar(header)
+
+        # Pages live in a Stack we transition through.
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        toolview.set_content(self.stack)
+
+        self.welcome  = WelcomePage()
+        self.disk_pg  = DiskPage()
+        self.user_pg  = UserPage()
+        self.locale   = LocalePage()
+        self.confirm  = ConfirmPage()
+        self.progress = ProgressPage()
+        self.done     = DonePage(self._reboot)
+
+        for name, w in [("welcome", self.welcome),
+                        ("disk", self.disk_pg),
+                        ("user", self.user_pg),
+                        ("locale", self.locale),
+                        ("confirm", self.confirm),
+                        ("progress", self.progress),
+                        ("done", self.done)]:
+            self.stack.add_named(w, name)
+
+        # Bottom action bar.
+        action = Gtk.Box(spacing=8, margin_start=16, margin_end=16,
+                         margin_top=12, margin_bottom=12)
+        action.set_halign(Gtk.Align.END)
+        toolview.add_bottom_bar(action)
+
+        self.btn_back = Gtk.Button.new_with_label("Back")
+        self.btn_back.connect("clicked", self._on_back)
+        self.btn_next = Gtk.Button.new_with_label("Continue")
+        self.btn_next.add_css_class("suggested-action")
+        self.btn_next.add_css_class("pill")
+        self.btn_next.connect("clicked", self._on_next)
+        action.append(self.btn_back)
+        action.append(self.btn_next)
+
+        self.disk_pg.connect("selection-changed", self._on_disk_selected)
+
+        self._step = 0
+        self._steps = ["welcome", "disk", "user", "locale", "confirm",
+                       "progress", "done"]
+        self._refresh_buttons()
+        self.win.present()
+
+    # ---- navigation ------------------------------------------------- #
+
+    def _on_disk_selected(self, _src, name):
+        self.disk = name
+        self._refresh_buttons()
+
+    def _on_back(self, *_):
+        if self._step == 0:
+            return
+        self._step -= 1
+        self.stack.set_visible_child_name(self._steps[self._step])
+        self._refresh_buttons()
+
+    def _on_next(self, *_):
+        cur = self._steps[self._step]
+        if cur == "disk" and not self.disk_pg.selected():
+            return
+        if cur == "user" and not self.user_pg.validate():
+            return
+        if cur == "confirm":
+            self._start_install()
+            return
+        if cur == "progress":
+            return  # disabled while running
+        self._step += 1
+        nxt = self._steps[self._step]
+        if nxt == "confirm":
+            host, user, _, _ = self.user_pg.values()
+            locale = self.locale.locale.get_selected_item().get_string()
+            tz     = self.locale.tz.get_selected_item().get_string()
+            self.confirm.update(self.disk, host, user, locale, tz)
+        self.stack.set_visible_child_name(nxt)
+        self._refresh_buttons()
+
+    def _refresh_buttons(self):
+        cur = self._steps[self._step]
+        self.btn_back.set_visible(cur not in ("welcome", "progress", "done"))
+        self.btn_next.set_visible(cur not in ("progress", "done"))
+        if cur == "confirm":
+            self.btn_next.set_label("Install")
+            self.btn_next.remove_css_class("suggested-action")
+            self.btn_next.add_css_class("destructive-action")
+        else:
+            self.btn_next.set_label("Continue")
+            self.btn_next.remove_css_class("destructive-action")
+            self.btn_next.add_css_class("suggested-action")
+
+    # ---- install ---------------------------------------------------- #
+
+    def _start_install(self):
+        host, user, pw, _ = self.user_pg.values()
+        locale = self.locale.locale.get_selected_item().get_string()
+        tz     = self.locale.tz.get_selected_item().get_string()
+
+        cfg = tempfile.NamedTemporaryFile("w", delete=False, suffix=".cfg")
+        cfg.write(
+            f"DISK={self.disk}\n"
+            f"HOSTNAME={host}\n"
+            f"USERNAME={user}\n"
+            f"PASSWORD={pw!r}\n"
+            f"LOCALE={locale!r}\n"
+            f"TZ={tz!r}\n"
+            f"ASSUME_YES=1\n"
+        )
+        cfg.close()
+        os.chmod(cfg.name, 0o600)
+
+        self._step = self._steps.index("progress")
+        self.stack.set_visible_child_name("progress")
+        self._refresh_buttons()
+
+        threading.Thread(target=self._run_installer,
+                         args=(cfg.name,), daemon=True).start()
+
+    def _run_installer(self, cfg_path):
+        cmd = ["pkexec", INSTALL, "--config", cfg_path]
+        try:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT, text=True,
+                                    bufsize=1)
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    GLib.idle_add(self._update_progress, line)
+            ok = proc.wait() == 0
+        except Exception as e:
+            GLib.idle_add(self._update_progress, f"error: {e}")
+            ok = False
+        finally:
+            try:
+                os.unlink(cfg_path)
+            except OSError:
+                pass
+
+        GLib.idle_add(self._install_finished, ok)
+
+    def _update_progress(self, line):
+        # Map a few well-known phrases to a friendly status label.
+        lower = line.lower()
+        if "creating gpt" in lower:
+            self.progress.set_status("Partitioning the disk…", line)
+        elif "formatting esp" in lower or "formatting root" in lower:
+            self.progress.set_status("Formatting the file systems…", line)
+        elif "installing base system" in lower or "downloading" in lower or "installing" in lower:
+            self.progress.set_status("Installing packages…", line)
+        elif "configure" in lower or "creating user" in lower:
+            self.progress.set_status("Configuring your account…", line)
+        else:
+            self.progress.set_status(self.progress.label.get_label(), line)
+        return False
+
+    def _install_finished(self, ok):
+        if ok:
+            self._step = self._steps.index("done")
+            self.stack.set_visible_child_name("done")
+        else:
+            self._fatal("Installation failed. Check the terminal for details.")
+        self._refresh_buttons()
+        return False
+
+    def _reboot(self):
+        subprocess.Popen(["systemctl", "reboot"])
+
+    # ---- error ------------------------------------------------------ #
+
+    def _fatal(self, message):
+        dlg = Adw.MessageDialog(transient_for=self.props.active_window,
+                                heading="Installation problem",
+                                body=message)
+        dlg.add_response("ok", "OK")
+        dlg.set_default_response("ok")
+        dlg.connect("response", lambda *_: dlg.close())
+        dlg.present()
+
+
+def main():
+    app = InstallerApp()
+    return app.run(sys.argv)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
