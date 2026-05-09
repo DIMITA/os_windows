@@ -44,7 +44,7 @@ impl AuditWriter {
                 file,
                 file_name: today.clone(),
                 running_hash,
-                seq: last_seq,
+                seq: last_seq + 1,
             }
         } else {
             let head = ChainHead::load(&head_path)?;
@@ -79,15 +79,65 @@ impl AuditWriter {
     }
 
     pub fn write(&mut self, req: WriteRequest) -> Result<()> {
+        let today = today_filename()?;
+        if today != self.file_name {
+            self.rotate_to(&today, req.session.clone(), req.mode)?;
+        }
+        self.write_inner(req)
+    }
+
+    pub fn running_hash(&self) -> &str {
+        &self.running_hash
+    }
+
+    pub fn seq(&self) -> u64 {
+        self.seq
+    }
+
+    /// Force a rotation to the named file. Used by `write()` on day rollover
+    /// and exposed for tests.
+    pub fn rotate_to(&mut self, new_name: &str, session: String, mode: Mode) -> Result<()> {
+        let prev_file = self.file_name.clone();
+        self.write_inner(WriteRequest {
+            session: session.clone(),
+            mode,
+            payload: EntryPayload::SystemRotatePre,
+        })?;
+        self.file.sync_all().ok();
+
+        let prev_path = self.dir.join(&prev_file);
+        chattr_append_only(&prev_path);
+
+        let new_path = self.dir.join(new_name);
+        self.file = OpenOptions::new()
+            .append(true)
+            .create(true)
+            .open(&new_path)
+            .with_context(|| format!("open {}", new_path.display()))?;
+        self.file_name = new_name.to_string();
+        self.seq = 0;
+        update_symlink(&self.dir, new_name)?;
+
+        self.write_inner(WriteRequest {
+            session,
+            mode,
+            payload: EntryPayload::SystemRotatePost {
+                prev_file: Some(prev_file),
+            },
+        })?;
+        Ok(())
+    }
+
+    fn write_inner(&mut self, req: WriteRequest) -> Result<()> {
+        let this_seq = self.seq;
         self.seq += 1;
         let ts = OffsetDateTime::now_utc()
             .format(&Rfc3339)
             .context("format ts")?;
         let id = wilai_core::types::new_ulid();
-
         let mut obj = Map::new();
         obj.insert("v".into(), Value::from(SCHEMA_VERSION));
-        obj.insert("seq".into(), Value::from(self.seq));
+        obj.insert("seq".into(), Value::from(this_seq));
         obj.insert("ts".into(), Value::from(ts));
         obj.insert("id".into(), Value::from(id));
         obj.insert("prev_hash".into(), Value::from(self.running_hash.clone()));
@@ -99,29 +149,18 @@ impl AuditWriter {
                 obj.insert(k, v);
             }
         }
-
         let bytes = serde_json::to_vec(&Value::Object(obj))?;
         self.file.write_all(&bytes)?;
         self.file.write_all(b"\n")?;
         self.file.sync_data()?;
-
         self.running_hash = sha256_hex(&bytes);
-
         let head = ChainHead {
             running_hash: self.running_hash.clone(),
-            last_seq: self.seq,
+            last_seq: this_seq,
             current_file: self.file_name.clone(),
         };
         head.save_atomic(&self.dir.join("chain.head"))?;
         Ok(())
-    }
-
-    pub fn running_hash(&self) -> &str {
-        &self.running_hash
-    }
-
-    pub fn seq(&self) -> u64 {
-        self.seq
     }
 
     pub fn spawn_task(mut self) -> (mpsc::Sender<WriteRequest>, tokio::task::JoinHandle<()>) {
@@ -146,6 +185,29 @@ fn today_filename() -> Result<String> {
         u8::from(now.month()),
         now.day()
     ))
+}
+
+fn chattr_append_only(path: &Path) {
+    let out = std::process::Command::new("chattr")
+        .arg("+a")
+        .arg(path)
+        .output();
+    match out {
+        Ok(o) if o.status.success() => {
+            tracing::debug!("chattr +a applied to {}", path.display());
+        }
+        Ok(o) => {
+            tracing::warn!(
+                "chattr +a failed on {} ({}): {}",
+                path.display(),
+                o.status,
+                String::from_utf8_lossy(&o.stderr).trim()
+            );
+        }
+        Err(e) => {
+            tracing::warn!("chattr unavailable for {}: {e}", path.display());
+        }
+    }
 }
 
 fn update_symlink(dir: &Path, target: &str) -> Result<()> {

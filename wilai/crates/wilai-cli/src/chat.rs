@@ -6,7 +6,7 @@ use wilai_audit::entry::EntryPayload;
 use wilai_audit::writer::{AuditWriter, WriteRequest};
 use wilai_core::{types::new_ulid, Mode};
 use wilai_providers::{
-    ChatRequest, Message, MessageRole, OllamaProvider, Provider, ToolCall,
+    AnthropicProvider, ChatRequest, Message, MessageRole, OllamaProvider, Provider, ToolCall,
 };
 use wilai_tools::confirm::{ConfirmAnswer, ConfirmDefault, Confirmer, TtyConfirmer};
 use wilai_tools::guards::{evaluate, GuardOutcome};
@@ -106,7 +106,17 @@ fn build_provider(
                 .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
             Ok(Box::new(OllamaProvider::new(name, url)?))
         }
-        other => Err(anyhow!("provider type {other} not implemented in v0.5")),
+        "anthropic" => {
+            let env_var = pcfg
+                .api_key_env
+                .clone()
+                .unwrap_or_else(|| "ANTHROPIC_API_KEY".to_string());
+            let key = std::env::var(&env_var).map_err(|_| {
+                anyhow!("env var {env_var} unset; required for anthropic provider")
+            })?;
+            Ok(Box::new(AnthropicProvider::new(name, key, pcfg.url.clone())?))
+        }
+        other => Err(anyhow!("provider type {other} not implemented yet")),
     }
 }
 
