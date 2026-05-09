@@ -1,0 +1,43 @@
+name: hyprland.dispatch
+version: 1
+description: Dispatch a Hyprland command via hyprctl. Use for window/workspace operations.
+category: write
+risk: low
+
+inputs:
+  action:
+    type: enum
+    required: true
+    values:
+      - workspace
+      - togglefloating
+      - togglesplit
+      - fullscreen
+      - centerwindow
+      - movefocus
+      - movewindow
+      - cyclenext
+      - killactive
+    description: Hyprland dispatcher action.
+  args:
+    type: array
+    items: { type: string }
+    default: []
+    description: Positional arguments for the action.
+
+executor:
+  type: subprocess
+  cmd: ["hyprctl", "dispatch", "{action}", "{args}"]
+  timeout_s: 5
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [action, args]
+
+examples:
+  - args: { action: "workspace", args: ["3"] }
+    note: "Switch to workspace 3."
+  - args: { action: "togglefloating", args: [] }
+    note: "Toggle floating on the active window."

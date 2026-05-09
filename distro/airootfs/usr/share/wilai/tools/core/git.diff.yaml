@@ -1,0 +1,36 @@
+name: git.diff
+version: 1
+description: Show changes in the working tree against a ref (default HEAD).
+category: read
+risk: none
+
+inputs:
+  cwd:
+    type: string
+    pattern: path
+    default: "."
+  ref:
+    type: string
+    pattern: git_ref
+    default: "HEAD"
+    description: Ref to diff against. Defaults to HEAD (unstaged changes).
+  paths:
+    type: array
+    items: { type: string }
+    default: []
+    description: Optional list of paths to limit the diff to.
+
+executor:
+  type: subprocess
+  cmd: ["git", "-C", "{cwd}", "diff", "{ref}", "--", "{paths}"]
+  timeout_s: 15
+  output:
+    capture: stdout
+    max_bytes: 524288
+
+audit:
+  fields: [cwd, ref, paths]
+
+examples:
+  - args: { cwd: ".", ref: "HEAD" }
+    note: "Show unstaged changes."

@@ -143,3 +143,13 @@ jq
 lsof
 usbutils
 pciutils
+
+# Wilai system agent runtime dependencies. The four binaries themselves
+# (wilai, wilai-daemon, wilai-voice, wilai-overlay) are staged into
+# /usr/local/bin/ by scripts/build-iso.sh. These packages cover the
+# external engines and CLIs Wilai shells out to.
+zenity
+libnotify
+ollama
+alsa-utils
+nmap

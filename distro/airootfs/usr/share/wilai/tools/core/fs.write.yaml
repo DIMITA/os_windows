@@ -1,0 +1,39 @@
+name: fs.write
+version: 1
+description: Write text content to a file. Creates parent directories. Overwrites by default.
+category: write
+risk: medium
+
+inputs:
+  path:
+    type: string
+    pattern: path
+    required: true
+    description: Path to the file to write.
+  content:
+    type: string
+    required: true
+    description: UTF-8 text to write.
+  create_only:
+    type: boolean
+    default: false
+    description: Fail if the file already exists.
+
+guards:
+  - if: "path_outside_home(path)"
+    confirm: "Write to {path} (outside $HOME). Confirm?"
+
+executor:
+  type: builtin
+  fn: fs.write.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 1024
+
+audit:
+  fields: [path, create_only]
+
+examples:
+  - args: { path: "~/notes.txt", content: "hello" }
+    note: "Write a small note in $HOME (no confirm)."
