@@ -506,13 +506,19 @@ async fn execute_call(
     if is_pentest_tool {
         service.mode.pentest_started();
     }
-    let result = Executor::run(spec, &validated)
-        .await
-        .with_context(|| format!("execute {}", spec.name));
+    // Route MCP-prefixed tools to their backing client; everything else
+    // goes through the local Executor.
+    let result_outcome = if let Some((server, mcp_tool)) = parse_mcp_name(&spec.name) {
+        run_mcp_tool(service, server, mcp_tool, &validated).await
+    } else {
+        Executor::run(spec, &validated)
+            .await
+            .with_context(|| format!("execute {}", spec.name))
+    };
     if is_pentest_tool {
         service.mode.pentest_finished();
     }
-    let result = result?;
+    let result = result_outcome?;
 
     let exec_kind = match &spec.executor {
         wilai_tools::ExecutorSpec::Subprocess(_) => "subprocess",
@@ -562,6 +568,46 @@ async fn execute_call(
         .await;
 
     Ok(result.output)
+}
+
+fn parse_mcp_name(name: &str) -> Option<(&str, &str)> {
+    let rest = name.strip_prefix("mcp.")?;
+    let dot = rest.find('.')?;
+    Some((&rest[..dot], &rest[dot + 1..]))
+}
+
+async fn run_mcp_tool(
+    service: &Service,
+    server: &str,
+    tool: &str,
+    args: &Value,
+) -> Result<wilai_tools::ExecResult> {
+    use std::time::Instant;
+    let client = service
+        .mcp
+        .get(server)
+        .ok_or_else(|| anyhow!("mcp server `{server}` not registered"))?;
+    let start = Instant::now();
+    let res = client.call_tool(tool, args.clone()).await?;
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let mut text = String::new();
+    for block in &res.content {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&block.render());
+    }
+    let exit_code = if res.is_error { 1 } else { 0 };
+    let total = text.len();
+    let truncated = false; // mcp content already serialized; left as-is
+    Ok(wilai_tools::ExecResult {
+        exit_code,
+        output: text,
+        output_bytes: total,
+        truncated,
+        duration_ms,
+        rendered_cmd: Some(vec![format!("mcp:{server}.{tool}")]),
+    })
 }
 
 fn spawn_mode_relay(

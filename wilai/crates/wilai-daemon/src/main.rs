@@ -32,8 +32,19 @@ async fn main() -> Result<()> {
 
     let cfg = wilai_core::Config::load()?;
     let dirs = collect_tool_dirs(&cfg);
-    let registry = wilai_tools::Registry::load_from_dirs(&dirs, &cfg.tools.disabled)?;
+    let mut registry = wilai_tools::Registry::load_from_dirs(&dirs, &cfg.tools.disabled)?;
     tracing::info!(tool_count = registry.len(), "tools loaded");
+
+    // Bring up MCP servers and merge their tools into the registry under
+    // the `mcp.<server>.<tool>` namespace.
+    let mcp_clients = wilai_daemon::service::init_mcp(&cfg, &mut registry).await;
+    if !mcp_clients.is_empty() {
+        tracing::info!(
+            mcp_servers = mcp_clients.len(),
+            "mcp clients spawned (registry now has {} tools)",
+            registry.len()
+        );
+    }
 
     let (audit, audit_dir) = open_audit(&cfg).await?;
     tracing::info!(dir = %audit_dir.display(), "audit ready");
@@ -61,6 +72,7 @@ async fn main() -> Result<()> {
         default_provider: cfg.general.default_provider,
         default_model: cfg.general.default_model,
         confirm_timeout_s: cfg.general.confirm_timeout_s,
+        mcp: mcp_clients,
     });
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);

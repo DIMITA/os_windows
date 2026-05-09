@@ -15,6 +15,29 @@ pub struct Config {
     pub audit: AuditConfig,
     #[serde(default)]
     pub mode: ModeConfig,
+    #[serde(default)]
+    pub mcp: BTreeMap<String, McpServerConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerConfig {
+    /// Executable to spawn (e.g. "npx", "python", "/path/to/server").
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Extra environment variables for the server process. Inherited
+    /// environment is filtered down to PATH/LANG/LC_ALL/HOME by the daemon.
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    /// If true (default), this server is not spawned in pentest mode and
+    /// any of its tools are gated out. Set false only for fully-local
+    /// servers that you have audited (e.g. a local-files MCP server).
+    #[serde(default = "default_true")]
+    pub gate_in_pentest: bool,
+    /// If false, the server is declared but not actually spawned. Useful
+    /// for staging or troubleshooting.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 impl Default for Config {
@@ -35,6 +58,7 @@ impl Default for Config {
             tools: ToolsConfig::default(),
             audit: AuditConfig::default(),
             mode: ModeConfig::default(),
+            mcp: BTreeMap::new(),
         }
     }
 }

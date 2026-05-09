@@ -5,6 +5,7 @@ members = [
     "crates/wilai-audit",
     "crates/wilai-tools",
     "crates/wilai-providers",
+    "crates/wilai-mcp",
     "crates/wilai-daemon",
     "crates/wilai-voice",
     "crates/wilai-overlay",
@@ -43,6 +44,7 @@ wilai-audit = { path = "crates/wilai-audit" }
 wilai-tools = { path = "crates/wilai-tools" }
 wilai-providers = { path = "crates/wilai-providers" }
 wilai-daemon = { path = "crates/wilai-daemon" }
+wilai-mcp = { path = "crates/wilai-mcp" }
 wilai-voice = { path = "crates/wilai-voice" }
 wilai-overlay = { path = "crates/wilai-overlay" }
 

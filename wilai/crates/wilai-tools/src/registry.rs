@@ -62,6 +62,17 @@ impl Registry {
         self.tools.get(name)
     }
 
+    /// Insert a tool spec built at runtime (e.g. from an MCP descriptor).
+    /// Versions follow the same rule as YAML loads: only newer wins.
+    pub fn insert_dynamic(&mut self, spec: ToolSpec) {
+        if let Some(existing) = self.tools.get(&spec.name) {
+            if existing.version >= spec.version {
+                return;
+            }
+        }
+        self.tools.insert(spec.name.clone(), spec);
+    }
+
     pub fn names(&self) -> impl Iterator<Item = &str> {
         self.tools.keys().map(|s| s.as_str())
     }

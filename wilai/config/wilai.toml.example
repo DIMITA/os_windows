@@ -25,3 +25,19 @@ max_size_mb           = 256
 [mode]
 auto_detect = true
 threshold   = 100
+
+# Model Context Protocol servers. Each entry spawns a long-running
+# subprocess at daemon startup and exposes its tools in the Wilai
+# registry under `mcp.<server>.<tool>`. Disable any of them by setting
+# `enabled = false` or by removing the section.
+#
+# [mcp.github]
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-github"]
+# env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "..." }
+# gate_in_pentest = true
+#
+# [mcp.brave]
+# command = "brave-mcp-server"
+# args    = []
+# env     = { BRAVE_API_KEY = "..." }

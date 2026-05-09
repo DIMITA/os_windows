@@ -1,5 +1,6 @@
 use crate::mode_mgr::ModeManager;
 use anyhow::{anyhow, Context, Result};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::{UnixListener, UnixStream};
@@ -7,6 +8,7 @@ use tokio::sync::mpsc;
 use wilai_audit::writer::WriteRequest;
 use wilai_audit::AuditWriter;
 use wilai_core::{Config, Mode};
+use wilai_mcp::McpClient;
 use wilai_providers::{AnthropicProvider, OllamaProvider, Provider};
 use wilai_tools::Registry;
 
@@ -18,6 +20,9 @@ pub struct Service {
     pub default_provider: String,
     pub default_model: String,
     pub confirm_timeout_s: u32,
+    /// Map from server name to live MCP client. Tools registered as
+    /// `mcp.<server>.<tool>` route here.
+    pub mcp: HashMap<String, Arc<McpClient>>,
 }
 
 impl Service {
@@ -55,6 +60,54 @@ impl Service {
         }
         Ok(provider)
     }
+}
+
+/// Spawn each enabled MCP server, list its tools, and merge them into the
+/// registry under the prefix `mcp.<server>.<tool>`. Returns a map of live
+/// clients that the agent loop can route calls to. A failure to spawn one
+/// server is logged but does not abort daemon startup; the rest still come up.
+pub async fn init_mcp(
+    cfg: &Config,
+    registry: &mut Registry,
+) -> HashMap<String, Arc<McpClient>> {
+    let mut out: HashMap<String, Arc<McpClient>> = HashMap::new();
+    for (name, server_cfg) in &cfg.mcp {
+        if !server_cfg.enabled {
+            tracing::info!(server = %name, "mcp server disabled in config; skipping");
+            continue;
+        }
+        match McpClient::spawn(name, &server_cfg.command, &server_cfg.args, &server_cfg.env).await {
+            Ok(client) => match client.list_tools().await {
+                Ok(tools) => {
+                    let mut count = 0;
+                    for desc in &tools {
+                        match wilai_mcp::convert::descriptor_to_spec(name, desc) {
+                            Ok(spec) => {
+                                registry.insert_dynamic(spec);
+                                count += 1;
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    server = %name,
+                                    tool = %desc.name,
+                                    "skip mcp tool: {e:#}"
+                                );
+                            }
+                        }
+                    }
+                    tracing::info!(server = %name, tools = count, "mcp server ready");
+                    out.insert(name.clone(), client);
+                }
+                Err(e) => {
+                    tracing::error!(server = %name, "mcp tools/list failed: {e:#}");
+                }
+            },
+            Err(e) => {
+                tracing::error!(server = %name, "mcp spawn failed: {e:#}");
+            }
+        }
+    }
+    out
 }
 
 pub fn collect_tool_dirs(cfg: &Config) -> Vec<PathBuf> {
