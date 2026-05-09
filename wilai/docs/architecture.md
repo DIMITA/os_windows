@@ -90,9 +90,10 @@ The daemon is a long-running user process started by a systemd user unit
 (`wilai.service`). It owns:
 
 - The Unix socket at `$XDG_RUNTIME_DIR/wilai.sock`.
-- The agent loop and provider connections.
-- The audit writer (one process holds the file descriptor on the
-  current-day file with `O_APPEND`).
+- The session multiplexer (see below).
+- The agent loops and provider connections.
+- The audit writer (the daemon is the sole writer for the audit log;
+  see Section 10 and `audit-format.md` for the hash-chained format).
 - The policy engine (single source of truth for the active mode).
 
 The CLI is short-lived. It opens the socket, sends a request, streams
@@ -103,6 +104,47 @@ the audit log.
 For the v0.5 MVP we may temporarily fold the daemon into the CLI to
 shorten the iteration loop, behind a `--in-process` flag, but the IPC
 boundary is the design target.
+
+### Multi-session concurrency
+
+A single daemon serves any number of concurrent sessions. Each client
+connection on the Unix socket opens one or more sessions; sessions
+from different clients are fully independent except for two shared
+resources:
+
+- **The policy engine.** Mode is global; a mode change in any session
+  affects all sessions. This is intentional - the operator must not
+  be able to mix `normal` and `pentest` work in parallel against the
+  same provider context.
+- **The audit log.** All sessions write to the same daily file via the
+  daemon's single writer. Writes are serialized through an internal
+  mpsc channel so the hash chain stays linear and deterministic.
+
+Each session carries its own conversation state, its own `turn_id`
+counter, and its own selected provider/model (subject to mode
+restrictions). The session id (`ULID`) is recorded on every audit
+entry so a session can be reconstructed end-to-end after the fact.
+
+Concurrency model inside the daemon:
+
+```
+clients (N)  -- ipc -->  session tasks (N)  -- mpsc -->  audit writer (1)
+                                              \
+                                               -- pool -->  provider clients
+                                              /
+                                              -- registry -->  tool executors
+```
+
+Provider clients are pooled per provider; tool executors are spawned
+per call (subprocess) or run in a Tokio task (builtin). The audit
+writer is a single task that owns the current-day file descriptor and
+the running hash; this is what guarantees the chain.
+
+Multi-profile support (separate daemons with separate audit chains for
+e.g. personal vs client work) is planned for v0.7+ via
+`wilai --profile <name>` selecting between
+`wilai-<name>.sock` sockets and per-profile audit directories. Not in
+v0.5.
 
 ## 6. Provider abstraction
 
@@ -234,8 +276,13 @@ Summary:
   (ext4, xfs); a warning is logged on filesystems that do not.
 - Schema is versioned (`v` field). Upgrades append a new version; old
   entries remain readable.
-- No hashing or signing in v1. The format is upgrade-ready: a future
-  `prev_hash` field can be added without breaking readers.
+- **Hash-chained from v1.** Every entry carries `prev_hash` (SHA-256 of
+  the previous entry's bytes) and `seq` (monotonic per file). The
+  chain spans rotations: the first entry of day N+1 hashes the last
+  entry of day N. Tampering or reordering is detectable with
+  `wilai audit verify`.
+- Optional Ed25519 signing is reserved for a later release; the `sig`
+  field is documented but not produced in v0.5.
 
 CLI:
 
@@ -294,7 +341,7 @@ Threats considered:
 | LLM hallucinates a destructive command        | Tools are typed; no shell strings produced  |
 | LLM mis-fills args (wrong path, wrong flag)   | Schema validator + per-tool guards          |
 | Compromised provider replays old tool calls   | Each turn carries a fresh nonce; daemon refuses re-execution of the same `(turn_id, tool_call_id)` |
-| Local malware tampers with audit log          | `chattr +a` on rotated files; user can re-verify with `wilai audit verify` |
+| Local malware tampers with audit log          | Hash chain over every entry; `chattr +a` on rotated files; `wilai audit verify` detects break, reorder, truncate |
 | Unintended cloud egress in pentest mode       | Mode guard rejects non-local providers; CLI override is filtered before egress |
 | Voice wake-word records ambient conversation  | Wake-word engine runs locally; no audio leaves the host until the user-bound action begins; visible state in wilbar |
 

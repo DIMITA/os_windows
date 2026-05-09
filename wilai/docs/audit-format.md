@@ -13,14 +13,16 @@ the metadata level. It is the operator's primary forensic surface.
 
 - Append-only on disk, with minimal hassle. No external service.
 - Plain JSONL so `jq`, `grep`, `awk`, and any pipeline tool work.
+- Tamper-evident: a hash chain over every entry, spanning rotations.
 - Forward-compatible: adding fields must not break existing readers.
 - Replayable: enough information per entry to reconstruct what happened
   and, where the operation was deterministic, re-run it.
 
 ## 2. Non-goals (v1)
 
-- No cryptographic chaining or signing. The format is upgrade-ready
-  (see Section 11), but v1 stays simple.
+- No cryptographic signing of entries. The format reserves a `sig`
+  field; v0.5 does not produce one. Hardware-backed signing
+  (YubiKey / PIV) is planned for a later release.
 - No remote shipping. If the operator wants offsite copies, they wire
   `journalctl` or `rsync` themselves; Wilai does not ship anything.
 - No structured query engine beyond the CLI's `grep` / `tail` / `show`.
@@ -31,6 +33,7 @@ the metadata level. It is the operator's primary forensic surface.
 ```
 ~/.local/share/wilai/audit/
   current.jsonl          -> symlink to today's file
+  chain.head             <- last hash + last seq + last file (atomic update)
   2026-05-09.jsonl       <- active, no chattr
   2026-05-08.jsonl       <- rotated, chattr +a applied
   2026-05-07.jsonl       <- rotated, chattr +a applied
@@ -41,32 +44,54 @@ Rules:
 
 - One file per UTC day, named `YYYY-MM-DD.jsonl`.
 - The daemon holds the current file open in `O_APPEND` mode for its
-  lifetime; concurrent writers are not supported (the daemon is the
-  sole writer).
+  lifetime and is the sole writer for the audit log; concurrent
+  sessions write through an internal mpsc channel that the audit
+  writer task drains in order.
+- `chain.head` is a small file (~200 bytes) that the daemon updates
+  atomically (write to `chain.head.tmp`, fsync, rename) after every
+  entry. It carries the running hash so the daemon can recover the
+  chain after a clean restart without re-reading the day's file. After
+  an unclean shutdown the daemon re-reads the tail of `current.jsonl`
+  and rebuilds the running hash from there; `chain.head` is treated
+  as a hint, not a source of truth.
 - On day rollover the daemon: closes the previous file, runs
   `chattr +a` on it (best-effort), updates `current.jsonl` symlink,
-  opens the new file in `O_APPEND`.
+  opens the new file in `O_APPEND`, writes a `system.rotate_post`
+  entry whose `prev_hash` chains back to the last entry of the
+  previous file.
 - On filesystems where `chattr +a` is not supported (zfs, btrfs without
   the right kernel, NFS, fuse), the daemon emits a single warning at
   start and continues with no append-only enforcement; this is logged
   at the start of the day's file as a `system.audit_chattr_unavailable`
-  entry.
+  entry. The hash chain is unaffected and remains the primary
+  tamper-evidence mechanism.
 
 ## 4. Entry schema
 
 Every line is a single JSON object terminated by `\n`. Field order is
-not significant. Schema version is carried in the `v` field.
+not significant for the hash (we hash the bytes as written, see
+Section 5). Schema version is carried in the `v` field.
 
 ### Common fields (every entry)
 
 | Field        | Type    | Required | Description                                |
 |--------------|---------|----------|--------------------------------------------|
 | `v`          | int     | yes      | Schema version. v1 in the MVP.             |
+| `seq`        | int     | yes      | Monotonic per-file sequence, starts at 0.  |
 | `ts`         | string  | yes      | RFC 3339 with millis, UTC.                 |
 | `id`         | string  | yes      | ULID, monotonic per process.               |
+| `prev_hash`  | string  | yes      | Hex SHA-256 of the previous entry's bytes. |
 | `kind`       | string  | yes      | Entry type (see below).                    |
 | `session`    | string  | yes      | ULID of the chat session.                  |
 | `mode`       | string  | yes      | `normal` or `pentest` at the time.         |
+| `sig`        | string? | no       | Reserved for Ed25519 signing. Absent in v0.5. |
+
+`prev_hash` and `seq` are the tamper-evidence pair. Verifying one
+without the other catches different attacks: `prev_hash` catches
+content tampering and reordering, `seq` catches deletions of
+contiguous entries that would otherwise leave a valid chain on the
+remaining entries. They are cheap to maintain and add ~80 bytes per
+entry.
 
 ### Per-`kind` payloads
 
@@ -143,14 +168,129 @@ a call happened, to whom, and how big it was, not what was said.
 
 Bookend entries with the session id, the entry binary
 (`wilai-cli` / `wilai-overlay` / `wilai-voice`), the user, and the
-working directory at start.
+working directory at start. Multiple sessions can be live in parallel;
+their `start` and `end` entries interleave with other sessions' entries
+in the same file, and the `session` field on every entry is what binds
+them together at query time.
 
 #### `kind: "system.*"` - audit subsystem events
 
-`system.rotate`, `system.chattr_applied`, `system.chattr_unavailable`,
-`system.daemon_start`, `system.daemon_stop`, `system.config_reload`.
+`system.daemon_start`, `system.daemon_stop`, `system.config_reload`,
+`system.rotate_pre`, `system.rotate_post`, `system.chattr_applied`,
+`system.chattr_unavailable`, `system.chain_genesis`,
+`system.chain_resume`.
 
-## 5. Append-only enforcement
+## 5. Hash chain
+
+### 5.1. What is hashed
+
+For each entry, `prev_hash` is the lowercase hex SHA-256 of the **exact
+bytes of the previous entry's serialized JSON line, excluding the
+trailing `\n`**. We hash the bytes as written, not a canonical form.
+This avoids any dependency on JSON canonicalization rules and makes
+verification a stream operation.
+
+The first entry of any file (whether after rotation or after first
+install) chains to the last entry of the previous file. Genesis
+(very first line ever written by Wilai on this host) uses
+`prev_hash = "00..00"` (64 zeros).
+
+### 5.2. Building an entry
+
+Pseudocode for the audit writer:
+
+```
+fn write_entry(payload):
+    seq      = next_seq_for_current_file()
+    prev_hash = running_hash                  # 64 hex chars
+    line_obj = { v:1, seq, ts, id, prev_hash, ...payload, sig: <maybe> }
+    line_bytes = serialize(line_obj)          # no trailing newline
+    file.write(line_bytes); file.write("\n"); file.fdatasync()
+
+    running_hash = sha256_hex(line_bytes)
+    chain_head.atomically_update({running_hash, seq, file: current_path})
+```
+
+Concurrency: the audit writer is a single task. All sessions submit
+entries through an mpsc channel. The writer drains them in order, so
+the chain is well-defined even with N concurrent sessions producing
+entries simultaneously.
+
+### 5.3. Genesis and resume
+
+- **Genesis** (first ever boot, no audit dir present):
+  the writer creates the dir, writes a `system.chain_genesis` entry
+  with `prev_hash = "00..00"`, then proceeds.
+- **Clean shutdown / restart**: writer reads `chain.head`, validates
+  it against the last line of `current.jsonl` (if present), and
+  resumes. Mismatch downgrades to the unclean path.
+- **Unclean shutdown / restart**: writer reads the tail of
+  `current.jsonl` to find the last well-formed line, recomputes its
+  SHA-256, sets `running_hash` to that, writes a
+  `system.chain_resume` entry that explicitly carries the recovered
+  hash, then proceeds.
+
+### 5.4. Cross-file chain
+
+At rotation:
+
+1. Last entry of file N is `system.rotate_pre`. Its hash becomes the
+   `prev_hash` of the first entry of file N+1.
+2. File N is closed, fsync'd, `chattr +a` applied.
+3. File N+1 is opened. First entry is `system.rotate_post` with
+   `seq = 0` and `prev_hash` = hash of `system.rotate_pre`.
+4. `chain.head` is updated to point at `system.rotate_post`.
+
+If the daemon crashes between step 2 and step 3, recovery on next
+start finds the closed file N with its last entry `system.rotate_pre`,
+opens (or creates) file N+1, and writes `system.rotate_post` chained
+to N. The chain survives.
+
+### 5.5. Verification
+
+`wilai audit verify` walks the entire audit directory in chronological
+order. For each entry:
+
+- Recomputes SHA-256 of the previous entry's bytes and compares to
+  this entry's `prev_hash`. Mismatch is a hard fail with the file,
+  byte offset, and entry id.
+- Checks `seq` is strictly monotone within a file, starting at 0.
+- Checks the last entry of file N's hash equals the first entry of
+  file N+1's `prev_hash`.
+- Checks `chattr +a` is set on rotated files (warning, not failure).
+
+Output is human-readable by default; `--json` emits a structured
+report for downstream tooling.
+
+Performance: SHA-256 over a typical entry (~300-1500 bytes) costs a
+few microseconds on any modern x86. Verifying a year of audit logs
+(tens of millions of entries) runs in seconds.
+
+### 5.6. What the chain does and does not protect
+
+**Detects**:
+- In-place modification of any entry (changes its bytes, breaks the
+  next entry's `prev_hash`).
+- Insertion of an entry between two existing ones.
+- Deletion of trailing entries from a file (breaks the cross-file
+  chain when the next file is processed).
+- Deletion of a contiguous block in the middle (breaks the chain at
+  the deletion boundary).
+- Reordering of entries (breaks the chain).
+
+**Does not detect on its own**:
+- Wholesale deletion of the entire most-recent file before any
+  cross-file linking has happened. Mitigation: `chain.head` has the
+  expected first hash of the next file; verification reports that
+  the expected continuation is missing.
+- Modification by an attacker who controls the daemon (then they
+  also control the running hash). Mitigation belongs to a future
+  signing scheme with a hardware-held key.
+- Truncation of the very first entry on first install. Mitigation:
+  `system.chain_genesis` is logged with a known shape; readers can
+  detect its absence.
+
+## 6. Append-only enforcement
 
 For ext4 and xfs:
 
@@ -161,50 +301,52 @@ For ext4 and xfs:
   defeat malware running as the user.
 - The active day file is **not** marked append-only - the daemon is
   writing to it. Tampering with the active file before rotation is
-  detectable indirectly (entry id ULIDs are monotonic; out-of-order
-  ids on rotation flag tampering).
+  detectable through the hash chain and through `seq` gaps.
 
 For filesystems without append-only support, the daemon emits a single
-warning at startup, logs `system.chattr_unavailable` as the first entry
-of the day, and continues. Operators who want hard guarantees should
-either run on ext4/xfs or pipe the audit log to an external append-only
-store of their choosing.
+warning at startup, logs `system.chattr_unavailable` as the first
+entry of the day, and continues. The hash chain remains the primary
+tamper-evidence mechanism even in that case.
 
 `wilai audit verify` walks the audit directory and reports:
 
+- Hash chain breaks (Section 5.5).
 - Files missing `chattr +a` that should have it.
-- Days with non-monotonic id sequences (suggests reordering).
+- Days with non-monotonic `seq` sequences.
 - Days where the size on disk is smaller than the recorded byte count
   in the most recent `system.daemon_stop` entry (suggests truncation).
 
-## 6. Rotation
+## 7. Rotation
 
 Trigger: UTC midnight, or on `SIGHUP`, or when the active file exceeds
 `audit.max_size_mb` (default 256). The first cause to fire wins.
 
-Sequence:
+Sequence (chained-aware, see Section 5.4):
 
-1. Write a `system.daemon_stop`-shaped `system.rotate_pre` entry.
+1. Write a `system.rotate_pre` entry as the last line of the active
+   file. This entry is a normal entry with its own `prev_hash`.
 2. `fsync(2)` the active file.
 3. Close the file descriptor.
 4. Run `chattr +a` on the closed file (best-effort; warn if it fails).
 5. Update the `current.jsonl` symlink atomically (`rename(2)`).
 6. Open the new file in `O_APPEND | O_CREAT`.
-7. Write a `system.rotate_post` entry as the first line.
+7. Write a `system.rotate_post` entry as the first line, with
+   `seq = 0` and `prev_hash` set to the SHA-256 of `rotate_pre`.
+8. Atomically update `chain.head`.
 
-If rotation fails between steps 3 and 6 (rare; disk full, perms wrong),
+If rotation fails between steps 3 and 7 (rare; disk full, perms wrong),
 the daemon refuses to continue executing tools and surfaces an error
-to the active session. Tools are not executed without an open audit
-descriptor.
+to all active sessions. Tools are not executed without an open audit
+descriptor and a valid hash chain head.
 
-## 7. Query CLI
+## 8. Query CLI
 
 ```
 wilai audit tail [-n N] [-f]
 wilai audit grep <regex> [--since <ts>] [--until <ts>] [--kind <kind>]
 wilai audit show <session_id>
 wilai audit replay <session_id> [--dry-run] [--from <id>] [--to <id>]
-wilai audit verify
+wilai audit verify [--json] [--since <date>]
 wilai audit stats [--since <ts>]   # tool counts, durations, denies
 ```
 
@@ -216,7 +358,8 @@ back to substring grep.
 `show <session_id>` reconstructs a session in chronological order,
 suitable for piping to `less` or to a report. The output groups
 `provider.call` -> [`tool.confirm`] -> `tool.exec` triples for
-readability.
+readability. Multiple sessions with overlapping timelines are
+isolated by the `session` field.
 
 `replay` is intentionally limited:
 
@@ -227,8 +370,11 @@ readability.
 - It runs each tool through the live policy engine; if a guard now
   denies what it allowed then, the replay stops and the operator is
   shown the divergence.
+- Replay does not modify the audit log of the original session; new
+  entries land in the current day's file with a fresh session id and
+  a `replay_of` field pointing at the original.
 
-## 8. Privacy
+## 9. Privacy
 
 The audit log is the most sensitive file Wilai writes.
 
@@ -246,35 +392,44 @@ The audit log is the most sensitive file Wilai writes.
 - Pentest mode increases verbosity (full args, full `output.sample`)
   but does not include prompt text.
 
-## 9. Examples
+## 10. Examples
 
 ```jsonl
-{"v":1,"ts":"2026-05-09T14:23:11.421Z","id":"01HX...","kind":"session.start","session":"01HX...A","mode":"normal","entry":"wilai-cli","cwd":"/home/dimita/work","user":"dimita"}
-{"v":1,"ts":"2026-05-09T14:23:14.005Z","id":"01HX...","kind":"provider.call","session":"01HX...A","mode":"normal","provider":"ollama","model":"mistral:7b-instruct","duration_ms":312,"n_tools":8,"n_messages":2}
-{"v":1,"ts":"2026-05-09T14:23:14.211Z","id":"01HX...","kind":"tool.exec","session":"01HX...A","mode":"normal","tool":{"name":"fs.read","version":1,"category":"read","risk":"none"},"args":{"path":"/etc/hosts","max_bytes":65536},"executor":"builtin","exit_code":0,"duration_ms":3,"output":{"bytes":221,"truncated":false,"sample":"127.0.0.1 localhost\n..."},"provider":"ollama","model":"mistral:7b-instruct","turn_id":"t1","tool_call_id":"call_a"}
-{"v":1,"ts":"2026-05-09T14:23:18.700Z","id":"01HX...","kind":"tool.confirm","session":"01HX...A","mode":"normal","tool":{"name":"fs.write"},"args":{"path":"/etc/hosts"},"prompt":"Path /etc/hosts is outside $HOME. Write?","answer":"no","latency_ms":1842}
-{"v":1,"ts":"2026-05-09T14:25:02.118Z","id":"01HX...","kind":"mode.change","session":"01HX...A","mode":"pentest","from":"normal","to":"pentest","trigger":"autodetect","score":150,"signals":["workspace_name","binary_active"]}
+{"v":1,"seq":0,"ts":"2026-05-09T00:00:00.001Z","id":"01HX...","prev_hash":"a3f1...","kind":"system.rotate_post","session":"-","mode":"normal","prev_file":"2026-05-08.jsonl"}
+{"v":1,"seq":1,"ts":"2026-05-09T14:23:11.421Z","id":"01HX...","prev_hash":"7e22...","kind":"session.start","session":"01HX...A","mode":"normal","entry":"wilai-cli","cwd":"/home/dimita/work","user":"dimita"}
+{"v":1,"seq":2,"ts":"2026-05-09T14:23:14.005Z","id":"01HX...","prev_hash":"4b9c...","kind":"provider.call","session":"01HX...A","mode":"normal","provider":"ollama","model":"mistral:7b-instruct","duration_ms":312,"n_tools":8,"n_messages":2}
+{"v":1,"seq":3,"ts":"2026-05-09T14:23:14.090Z","id":"01HX...","prev_hash":"d106...","kind":"session.start","session":"01HX...B","mode":"normal","entry":"wilai-cli","cwd":"/home/dimita/blog","user":"dimita"}
+{"v":1,"seq":4,"ts":"2026-05-09T14:23:14.211Z","id":"01HX...","prev_hash":"f810...","kind":"tool.exec","session":"01HX...A","mode":"normal","tool":{"name":"fs.read","version":1,"category":"read","risk":"none"},"args":{"path":"/etc/hosts","max_bytes":65536},"executor":"builtin","exit_code":0,"duration_ms":3,"output":{"bytes":221,"truncated":false,"sample":"127.0.0.1 localhost\n..."},"provider":"ollama","model":"mistral:7b-instruct","turn_id":"t1","tool_call_id":"call_a"}
+{"v":1,"seq":5,"ts":"2026-05-09T14:23:18.700Z","id":"01HX...","prev_hash":"2cd4...","kind":"tool.confirm","session":"01HX...B","mode":"normal","tool":{"name":"fs.write"},"args":{"path":"/etc/hosts"},"prompt":"Path /etc/hosts is outside $HOME. Write?","answer":"no","latency_ms":1842}
+{"v":1,"seq":6,"ts":"2026-05-09T14:25:02.118Z","id":"01HX...","prev_hash":"9b71...","kind":"mode.change","session":"01HX...A","mode":"pentest","from":"normal","to":"pentest","trigger":"autodetect","score":150,"signals":["workspace_name","binary_active"]}
 ```
 
-## 10. Daily summary (optional)
+Note that sessions `01HX...A` and `01HX...B` interleave their entries
+in the same file; the chain (`seq` and `prev_hash`) remains linear.
+The mode change at `seq:6` affects both sessions even though it was
+triggered from session A's context.
+
+## 11. Daily summary (optional)
 
 Off by default. When `audit.daily_summary = true`, the daemon writes a
 compact YAML summary at rotation time to
 `~/.local/share/wilai/audit/summary/YYYY-MM-DD.yaml` containing tool
-counts, deny counts, mode time-in-mode, and provider call totals. The
+counts, deny counts, mode time-in-mode, provider call totals, and the
+first/last `prev_hash` of the day for quick external pinning. The
 summary is derived; the JSONL remains source of truth.
 
-## 11. Future: hash chain and signing
+## 12. Future: signing
 
-When v2 lands, each entry gains:
+A later release will add Ed25519 signing of the chain. Two modes
+contemplated:
 
-- `prev_hash`: hex SHA-256 of the previous line's bytes (excluding
-  trailing newline). The first line of a file uses the previous file's
-  last-line hash; the very first day uses 64 zero bytes.
-- `sig`: optional Ed25519 signature over `id || ts || prev_hash`,
-  produced by a key the daemon controls (or a YubiKey-backed key when
-  `audit.sign = "yubikey"`).
+- **Software key**: a daemon-held private key in
+  `~/.local/share/wilai/keys/audit.ed25519`, mode `0600`. Convenient,
+  same trust boundary as the daemon itself.
+- **Hardware key**: signing operation delegated to a YubiKey or PIV
+  card. Requires user touch on every rotation (not every entry; the
+  rotation epilogue carries an aggregate signature over the chain
+  segment). Stronger guarantee, more friction.
 
-v1 entries remain valid in a v2 world; readers ignore unknown fields.
-The chain restarts at the boundary, with a `system.chain_restart` entry
-recording the genesis hash. There is no in-place migration of v1 logs.
+The `sig` field is reserved in v1; readers ignore it when absent.
+Adding signing is additive and does not break v1 logs.
