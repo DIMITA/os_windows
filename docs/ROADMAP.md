@@ -25,19 +25,26 @@ something useful on their own.
 - [x] FAT16 / FAT32 read-only with VFAT long file names
 - [x] Shell commands: `disks`, `parts`, `mount`, `umount`, `ls`, `cat`
 
-## Phase 1.1 — Write path + installer
+## Phase 1.1 — Write path (this commit)
 
-- [ ] FAT16/FAT32 write support (cluster allocation, FAT update, dir
-      mutation, `mkdir` / `cp` / `rm`)
+- [x] ATA PIO sector write + cache flush
+- [x] FAT16/FAT32 write support: cluster alloc/free, FAT entry mutation
+      across all FAT copies, dir entry creation, file create/write
+      (overwrite), unlink, mkdir, rmdir
+- [x] Shell commands: `write`, `mkdir`, `rm`, `rmdir`
+- [x] `wilinstall` planner — preview-only, never writes to disk
+
+## Phase 1.2 — Modern controllers + installer
+
+- [ ] Long file name (LFN) **write** support
 - [ ] Writable block device abstraction with sector cache
 - [ ] AHCI driver (modern SATA controllers in non-legacy mode)
 - [ ] NVMe driver (M.2 SSDs)
-- [ ] **wilinstall** : guided text installer
-      - lists candidate disks and refuses to write without typed-in
-        `YES, ERASE diskN` confirmation
+- [ ] **wilinstall** real install behind a typed confirmation token
+      (e.g. `WIPE DISK 0` typed exactly), with steps:
+      - lists candidate disks and refuses to write without the token
       - shrinks an existing partition or claims free space
-      - formats the target as the WilOS native filesystem (FAT32 in
-        1.1, journaled `wilfs` later)
+      - formats the target as FAT32 (1.2) or `wilfs` (later)
       - copies the kernel + GRUB to an EFI System Partition
       - installs the GRUB chainloader without touching the existing
         Windows entry (dual-boot first, replace-only later and only

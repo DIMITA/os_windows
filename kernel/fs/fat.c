@@ -361,3 +361,456 @@ int fat_lookup(fat_fs_t *fs, const char *path, fat_entry_t *out)
     }
     return 0;
 }
+
+/* ====================================================================
+ * Write path
+ * ==================================================================== */
+
+static int write_sectors(fat_fs_t *fs, uint32_t rel_sector,
+                         uint32_t count, const void *buf)
+{
+    return ata_write(fs->drive, fs->part_lba + rel_sector, count, buf);
+}
+
+static int set_fat_entry(fat_fs_t *fs, uint32_t cluster, uint32_t value)
+{
+    uint8_t buf[512];
+    uint32_t entry_size = (fs->type == FAT_TYPE_32) ? 4 : 2;
+    uint32_t fat_offset = cluster * entry_size;
+    uint32_t sec_off    = fat_offset / 512;
+    uint32_t in_sec     = fat_offset % 512;
+
+    /* Write to every FAT copy. */
+    for (uint8_t f = 0; f < fs->fat_count; f++) {
+        uint32_t sector = fs->fat_start + f * fs->sectors_per_fat + sec_off;
+        if (read_sectors(fs, sector, 1, buf) < 0) return -1;
+        if (fs->type == FAT_TYPE_32) {
+            uint32_t old = *(uint32_t *)(buf + in_sec);
+            uint32_t mark = (old & 0xF0000000) | (value & 0x0FFFFFFF);
+            *(uint32_t *)(buf + in_sec) = mark;
+        } else {
+            *(uint16_t *)(buf + in_sec) = (uint16_t)value;
+        }
+        if (write_sectors(fs, sector, 1, buf) < 0) return -1;
+    }
+    return 0;
+}
+
+static uint32_t alloc_cluster(fat_fs_t *fs)
+{
+    /* Linear scan from cluster 2. */
+    for (uint32_t c = 2; c < fs->cluster_count + 2; c++) {
+        uint32_t v = fat_next(fs, c);
+        if (v == 0) {
+            if (set_fat_entry(fs, c, 0x0FFFFFFF) < 0) return 0;
+            /* Zero the cluster's data sectors. */
+            uint8_t zero[512];
+            memset(zero, 0, sizeof(zero));
+            uint32_t s0 = cluster_to_sector(fs, c);
+            for (uint8_t s = 0; s < fs->sectors_per_cluster; s++) {
+                if (write_sectors(fs, s0 + s, 1, zero) < 0) return 0;
+            }
+            return c;
+        }
+    }
+    return 0;
+}
+
+static int free_cluster_chain(fat_fs_t *fs, uint32_t start)
+{
+    uint32_t c = start;
+    while (c >= 2 && c < 0x0FFFFFF8) {
+        uint32_t next = fat_next(fs, c);
+        if (set_fat_entry(fs, c, 0) < 0) return -1;
+        c = next;
+    }
+    return 0;
+}
+
+/* Convert "test.txt" or "VERY-LONG-NAME.TXT" to FAT 8.3 (11 bytes,
+ * space-padded, uppercase). Returns -1 if the source is too long. */
+static int make_short_name(const char *src, uint8_t out[11])
+{
+    memset(out, ' ', 11);
+    int i = 0, j = 0;
+    while (src[i] && src[i] != '.') {
+        if (j >= 8) return -1;
+        char c = src[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        out[j++] = (uint8_t)c;
+    }
+    if (src[i] == '.') i++;
+    j = 8;
+    while (src[i]) {
+        if (j >= 11) return -1;
+        char c = src[i++];
+        if (c >= 'a' && c <= 'z') c -= 32;
+        out[j++] = (uint8_t)c;
+    }
+    if (out[0] == 0x00 || out[0] == 0xE5) return -1;
+    return 0;
+}
+
+/* ----- directory mutation ----------------------------------------------- */
+
+/* Locate a directory by path. Returns 0 and fills `out_cluster` with
+ * the cluster of that directory (0 means "FAT16 root"). The root path
+ * "" / "/" returns cluster 0 on FAT16 or fs->root_cluster on FAT32. */
+static int dir_cluster_for_path(fat_fs_t *fs, const char *path,
+                                uint32_t *out_cluster)
+{
+    while (*path == '/') path++;
+    if (!*path) {
+        *out_cluster = (fs->type == FAT_TYPE_32) ? fs->root_cluster : 0;
+        return 0;
+    }
+    fat_entry_t e;
+    if (fat_lookup(fs, path, &e) < 0) return -1;
+    if (!e.is_dir) return -1;
+    *out_cluster = e.cluster;
+    return 0;
+}
+
+/* Split path into (parent_dir_path, leaf_name). The parent buffer
+ * receives a possibly-empty string for top-level paths. */
+static void split_path(const char *path, char *parent, size_t pcap, char *leaf, size_t lcap)
+{
+    while (*path == '/') path++;
+    const char *slash = NULL;
+    for (const char *p = path; *p; p++) if (*p == '/') slash = p;
+
+    if (!slash) {
+        parent[0] = '\0';
+        size_t n  = strlen(path);
+        if (n >= lcap) n = lcap - 1;
+        memcpy(leaf, path, n); leaf[n] = '\0';
+    } else {
+        size_t n = slash - path;
+        if (n >= pcap) n = pcap - 1;
+        memcpy(parent, path, n); parent[n] = '\0';
+        size_t m = strlen(slash + 1);
+        if (m >= lcap) m = lcap - 1;
+        memcpy(leaf, slash + 1, m); leaf[m] = '\0';
+    }
+}
+
+/* Iterate over the dir entries of a directory cluster (or FAT16 root)
+ * and either find an entry by short name (`needle` non-NULL) or find
+ * a free slot (`needle` NULL). On success fills `*sector` with the
+ * sector containing the entry and `*off` with the byte offset, plus
+ * an output buffer holding that sector's contents. */
+typedef struct {
+    bool      found;
+    bool      free_slot;
+    uint32_t  sector;
+    uint32_t  off;
+    uint8_t   buf[512];
+    /* tracking for extension when no free slot was found */
+    uint32_t  last_cluster;
+    uint32_t  last_sector;
+} dir_locator_t;
+
+static int dir_scan(fat_fs_t *fs, uint32_t dir_cluster,
+                    const uint8_t *needle_83 /*[11] or NULL*/,
+                    dir_locator_t *out)
+{
+    memset(out, 0, sizeof(*out));
+
+    bool fat16_root = (dir_cluster == 0 && fs->type != FAT_TYPE_32);
+    uint32_t cluster = dir_cluster;
+    uint32_t sector  = fat16_root ? fs->root_dir_sector : 0;
+    uint32_t scluster_remaining = fat16_root
+        ? ((fs->root_dir_entries * 32 + 511) / 512)
+        : fs->sectors_per_cluster;
+
+    while (1) {
+        uint32_t s0 = fat16_root ? sector : cluster_to_sector(fs, cluster);
+        uint32_t scount = fat16_root ? scluster_remaining : fs->sectors_per_cluster;
+
+        for (uint32_t k = 0; k < scount; k++) {
+            uint32_t cur = s0 + k;
+            if (read_sectors(fs, cur, 1, out->buf) < 0) return -1;
+
+            for (uint32_t off = 0; off < 512; off += 32) {
+                uint8_t *e = out->buf + off;
+                uint8_t a = e[11];
+
+                if (e[0] == 0x00) {
+                    if (!needle_83) {
+                        out->found     = true;
+                        out->free_slot = true;
+                        out->sector    = cur;
+                        out->off       = off;
+                        return 0;
+                    }
+                    /* End of directory and not found. */
+                    out->last_cluster = fat16_root ? 0 : cluster;
+                    out->last_sector  = cur;
+                    return 0;
+                }
+                if (e[0] == 0xE5) {
+                    if (!needle_83) {
+                        out->found     = true;
+                        out->free_slot = true;
+                        out->sector    = cur;
+                        out->off       = off;
+                        return 0;
+                    }
+                    continue;
+                }
+                if (a == ATTR_LFN || (a & ATTR_VOLUME_ID)) continue;
+
+                if (needle_83 && !memcmp(e, needle_83, 11)) {
+                    out->found  = true;
+                    out->sector = cur;
+                    out->off    = off;
+                    return 0;
+                }
+            }
+        }
+
+        if (fat16_root) {
+            out->last_cluster = 0;
+            out->last_sector  = s0 + scluster_remaining - 1;
+            return 0;
+        }
+        uint32_t next = fat_next(fs, cluster);
+        if (next >= 0x0FFFFFF8) {
+            out->last_cluster = cluster;
+            out->last_sector  = s0 + fs->sectors_per_cluster - 1;
+            return 0;
+        }
+        cluster = next;
+    }
+}
+
+static int dir_make_room(fat_fs_t *fs, dir_locator_t *loc)
+{
+    /* If we got here, the dir is full or its end-marker entry was at
+     * the last 32-byte slot. For FAT32 we extend the dir by one
+     * cluster. FAT16 root is fixed-size: refuse. */
+    if (loc->last_cluster == 0) return -1;        /* FAT16 root full */
+
+    uint32_t nc = alloc_cluster(fs);
+    if (!nc) return -1;
+    if (set_fat_entry(fs, loc->last_cluster, nc) < 0) return -1;
+
+    loc->free_slot = true;
+    loc->found     = true;
+    loc->sector    = cluster_to_sector(fs, nc);
+    loc->off       = 0;
+    /* The new cluster is already zeroed by alloc_cluster. */
+    if (read_sectors(fs, loc->sector, 1, loc->buf) < 0) return -1;
+    return 0;
+}
+
+static void fill_dir_entry(uint8_t *e, const uint8_t name83[11],
+                           uint8_t attr, uint32_t cluster, uint32_t size)
+{
+    memset(e, 0, 32);
+    memcpy(e, name83, 11);
+    e[11] = attr;
+    *(uint16_t *)(e + 20) = (uint16_t)((cluster >> 16) & 0xFFFF);
+    *(uint16_t *)(e + 26) = (uint16_t)(cluster & 0xFFFF);
+    *(uint32_t *)(e + 28) = size;
+}
+
+static int dir_find(fat_fs_t *fs, uint32_t dir_cluster, const char *leaf,
+                    dir_locator_t *loc)
+{
+    uint8_t needle[11];
+    if (make_short_name(leaf, needle) < 0) return -1;
+    if (dir_scan(fs, dir_cluster, needle, loc) < 0) return -1;
+    return loc->found ? 0 : -1;
+}
+
+static int dir_create_entry(fat_fs_t *fs, uint32_t dir_cluster,
+                            const uint8_t name83[11], uint8_t attr,
+                            uint32_t cluster, uint32_t size)
+{
+    /* Refuse duplicates. */
+    dir_locator_t check;
+    if (dir_scan(fs, dir_cluster, name83, &check) < 0) return -1;
+    if (check.found) return -1;
+
+    dir_locator_t slot;
+    if (dir_scan(fs, dir_cluster, NULL, &slot) < 0) return -1;
+    if (!slot.found) {
+        if (dir_make_room(fs, &slot) < 0) return -1;
+    }
+
+    fill_dir_entry(slot.buf + slot.off, name83, attr, cluster, size);
+    return write_sectors(fs, slot.sector, 1, slot.buf);
+}
+
+/* ----- public write API ------------------------------------------------- */
+
+int fat_create(fat_fs_t *fs, const char *path)
+{
+    char parent[FAT_NAME_MAX], leaf[FAT_NAME_MAX];
+    split_path(path, parent, sizeof(parent), leaf, sizeof(leaf));
+    if (!leaf[0]) return -1;
+
+    uint32_t pcl;
+    if (dir_cluster_for_path(fs, parent, &pcl) < 0) return -1;
+
+    uint8_t n83[11];
+    if (make_short_name(leaf, n83) < 0) return -1;
+    return dir_create_entry(fs, pcl, n83, ATTR_ARCHIVE, 0, 0);
+}
+
+int fat_write_file(fat_fs_t *fs, const char *path,
+                   const void *buf, uint32_t len)
+{
+    char parent[FAT_NAME_MAX], leaf[FAT_NAME_MAX];
+    split_path(path, parent, sizeof(parent), leaf, sizeof(leaf));
+    if (!leaf[0]) return -1;
+
+    uint32_t pcl;
+    if (dir_cluster_for_path(fs, parent, &pcl) < 0) return -1;
+
+    uint8_t n83[11];
+    if (make_short_name(leaf, n83) < 0) return -1;
+
+    /* Find or create the dir entry. */
+    dir_locator_t loc;
+    if (dir_scan(fs, pcl, n83, &loc) < 0) return -1;
+
+    bool created = false;
+    if (!loc.found) {
+        if (dir_create_entry(fs, pcl, n83, ATTR_ARCHIVE, 0, 0) < 0) return -1;
+        if (dir_scan(fs, pcl, n83, &loc) < 0 || !loc.found) return -1;
+        created = true;
+    }
+    (void)created;
+
+    uint8_t *e = loc.buf + loc.off;
+    if (e[11] & ATTR_DIRECTORY) return -1;
+
+    /* Free any existing chain. */
+    uint16_t lo  = *(uint16_t *)(e + 26);
+    uint16_t hi  = *(uint16_t *)(e + 20);
+    uint32_t old = ((uint32_t)hi << 16) | lo;
+    if (old >= 2 && old < 0x0FFFFFF8) free_cluster_chain(fs, old);
+
+    /* Allocate fresh chain. */
+    uint32_t bpc        = fs->sectors_per_cluster * 512;
+    uint32_t need_clus  = (len + bpc - 1) / bpc;
+    uint32_t first      = 0, prev = 0;
+
+    for (uint32_t i = 0; i < need_clus; i++) {
+        uint32_t c = alloc_cluster(fs);
+        if (!c) return -1;
+        if (i == 0) first = c;
+        else        set_fat_entry(fs, prev, c);
+        prev = c;
+    }
+
+    /* Write data cluster by cluster. */
+    static uint8_t cbuf[4096];
+    const uint8_t *src = (const uint8_t *)buf;
+    uint32_t written = 0;
+    uint32_t cur = first;
+    while (written < len && cur >= 2 && cur < 0x0FFFFFF8) {
+        uint32_t take = len - written;
+        if (take > bpc) take = bpc;
+        memset(cbuf, 0, bpc);
+        memcpy(cbuf, src + written, take);
+        uint32_t s0 = cluster_to_sector(fs, cur);
+        if (write_sectors(fs, s0, fs->sectors_per_cluster, cbuf) < 0) return -1;
+        written += take;
+        cur = fat_next(fs, cur);
+    }
+
+    /* Update dir entry: cluster + size. */
+    *(uint16_t *)(e + 20) = (uint16_t)((first >> 16) & 0xFFFF);
+    *(uint16_t *)(e + 26) = (uint16_t)(first & 0xFFFF);
+    *(uint32_t *)(e + 28) = len;
+    return write_sectors(fs, loc.sector, 1, loc.buf);
+}
+
+int fat_unlink(fat_fs_t *fs, const char *path)
+{
+    char parent[FAT_NAME_MAX], leaf[FAT_NAME_MAX];
+    split_path(path, parent, sizeof(parent), leaf, sizeof(leaf));
+    if (!leaf[0]) return -1;
+
+    uint32_t pcl;
+    if (dir_cluster_for_path(fs, parent, &pcl) < 0) return -1;
+
+    dir_locator_t loc;
+    if (dir_find(fs, pcl, leaf, &loc) < 0) return -1;
+
+    uint8_t *e = loc.buf + loc.off;
+    if (e[11] & ATTR_DIRECTORY) return -1;       /* use rmdir */
+
+    uint16_t lo = *(uint16_t *)(e + 26);
+    uint16_t hi = *(uint16_t *)(e + 20);
+    uint32_t cluster = ((uint32_t)hi << 16) | lo;
+    if (cluster >= 2 && cluster < 0x0FFFFFF8) free_cluster_chain(fs, cluster);
+
+    e[0] = 0xE5;
+    return write_sectors(fs, loc.sector, 1, loc.buf);
+}
+
+int fat_mkdir(fat_fs_t *fs, const char *path)
+{
+    char parent[FAT_NAME_MAX], leaf[FAT_NAME_MAX];
+    split_path(path, parent, sizeof(parent), leaf, sizeof(leaf));
+    if (!leaf[0]) return -1;
+
+    uint32_t pcl;
+    if (dir_cluster_for_path(fs, parent, &pcl) < 0) return -1;
+
+    uint32_t nc = alloc_cluster(fs);
+    if (!nc) return -1;
+
+    /* Initialise "." and ".." entries in the new cluster. */
+    static uint8_t cbuf[4096];
+    memset(cbuf, 0, sizeof(cbuf));
+    uint8_t dot[11];     memset(dot, ' ', 11);  dot[0] = '.';
+    uint8_t dotdot[11];  memset(dotdot, ' ', 11); dotdot[0] = '.'; dotdot[1] = '.';
+    fill_dir_entry(cbuf,      dot,    ATTR_DIRECTORY, nc,  0);
+    /* ".." points at the parent dir cluster (or 0 for the root). */
+    uint32_t parent_cluster = (pcl == fs->root_cluster && fs->type == FAT_TYPE_32) ? 0 : pcl;
+    fill_dir_entry(cbuf + 32, dotdot, ATTR_DIRECTORY, parent_cluster, 0);
+
+    uint32_t s0 = cluster_to_sector(fs, nc);
+    if (write_sectors(fs, s0, fs->sectors_per_cluster, cbuf) < 0) return -1;
+
+    uint8_t n83[11];
+    if (make_short_name(leaf, n83) < 0) return -1;
+    return dir_create_entry(fs, pcl, n83, ATTR_DIRECTORY, nc, 0);
+}
+
+int fat_rmdir(fat_fs_t *fs, const char *path)
+{
+    char parent[FAT_NAME_MAX], leaf[FAT_NAME_MAX];
+    split_path(path, parent, sizeof(parent), leaf, sizeof(leaf));
+    if (!leaf[0]) return -1;
+
+    uint32_t pcl;
+    if (dir_cluster_for_path(fs, parent, &pcl) < 0) return -1;
+
+    dir_locator_t loc;
+    if (dir_find(fs, pcl, leaf, &loc) < 0) return -1;
+    uint8_t *e = loc.buf + loc.off;
+    if (!(e[11] & ATTR_DIRECTORY)) return -1;
+
+    uint16_t lo = *(uint16_t *)(e + 26);
+    uint16_t hi = *(uint16_t *)(e + 20);
+    uint32_t target = ((uint32_t)hi << 16) | lo;
+
+    /* Verify it only contains "." and ".." */
+    fat_dir_t d;
+    d.fs = fs; d.cluster = target; d.offset = 0; d.fat16_root = false;
+    fat_entry_t fe;
+    while (fat_readdir(&d, &fe) > 0) {
+        if (!strcmp(fe.name, ".") || !strcmp(fe.name, "..")) continue;
+        return -1;     /* not empty */
+    }
+
+    if (target >= 2 && target < 0x0FFFFFF8) free_cluster_chain(fs, target);
+    e[0] = 0xE5;
+    return write_sectors(fs, loc.sector, 1, loc.buf);
+}

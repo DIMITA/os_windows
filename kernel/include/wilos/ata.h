@@ -26,4 +26,9 @@ const ata_drive_t *ata_drive(size_t i);
  * -1 on error. */
 int ata_read(size_t i, uint64_t lba, size_t count, void *buf);
 
+/* Write `count` sectors starting at `lba` to drive `i` from `buf`.
+ * Returns 0 on success, -1 on error. Issues a CACHE FLUSH after the
+ * last sector. Refuses to touch ATAPI devices. */
+int ata_write(size_t i, uint64_t lba, size_t count, const void *buf);
+
 #endif

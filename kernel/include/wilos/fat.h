@@ -48,4 +48,13 @@ int  fat_lookup(fat_fs_t *fs, const char *path, fat_entry_t *out);
 int  fat_read_file(fat_fs_t *fs, const fat_entry_t *e,
                    uint32_t offset, void *buf, uint32_t len);
 
+/* Write path. All paths are relative to the volume root. Names are
+ * limited to 8.3 short form on creation (LFN write comes later). */
+int  fat_create(fat_fs_t *fs, const char *path);
+int  fat_write_file(fat_fs_t *fs, const char *path,
+                    const void *buf, uint32_t len);
+int  fat_unlink(fat_fs_t *fs, const char *path);
+int  fat_mkdir(fat_fs_t *fs, const char *path);
+int  fat_rmdir(fat_fs_t *fs, const char *path);
+
 #endif

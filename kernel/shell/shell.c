@@ -77,6 +77,11 @@ static void cmd_help(void)
     kprintf("  umount          unmount current FAT volume\n");
     kprintf("  ls [PATH]       list directory on the mounted volume\n");
     kprintf("  cat PATH        print a text file\n");
+    kprintf("  write PATH STR  write STR to PATH (overwrites)\n");
+    kprintf("  mkdir PATH      create a directory\n");
+    kprintf("  rm PATH         delete a file\n");
+    kprintf("  rmdir PATH      delete an empty directory\n");
+    kprintf("  wilinstall D P  preview an installation plan (no writes)\n");
     kprintf("  panic           trigger a kernel panic (debug)\n");
     kprintf("  reboot          reboot the machine\n");
 }
@@ -88,7 +93,7 @@ static void cmd_about(void)
     vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
     kprintf("  A modern, glassmorphic operating system. Phase 1.0.\n");
     kprintf("  Kernel: i686 multiboot, monolithic with planned hybrid split.\n");
-    kprintf("  Disk: ATA PIO + MBR/GPT + FAT16/FAT32 read-only.\n");
+    kprintf("  Disk: ATA PIO read+write, MBR/GPT, FAT16/FAT32 read+write.\n");
     kprintf("  See docs/ROADMAP.md for the path to feature parity.\n\n");
 }
 
@@ -254,6 +259,102 @@ static void cmd_cat(const char *path)
     kprintf("\n");
 }
 
+static void cmd_write(char *arg)
+{
+    if (!have_mount) { kprintf("nothing mounted\n"); return; }
+    if (!arg || !*arg) { kprintf("usage: write <path> <text>\n"); return; }
+
+    char *path = arg;
+    char *sp   = arg;
+    while (*sp && *sp != ' ') sp++;
+    if (!*sp) { kprintf("usage: write <path> <text>\n"); return; }
+    *sp++ = '\0';
+    while (*sp == ' ') sp++;
+
+    if (fat_write_file(&mounted_fs, path, sp, (uint32_t)strlen(sp)) < 0) {
+        kprintf("write failed\n");
+        return;
+    }
+    kprintf("wrote %u bytes to %s\n", (unsigned)strlen(sp), path);
+}
+
+static void cmd_mkdir(const char *path)
+{
+    if (!have_mount) { kprintf("nothing mounted\n"); return; }
+    if (!path || !*path) { kprintf("usage: mkdir <path>\n"); return; }
+    if (fat_mkdir(&mounted_fs, path) < 0) { kprintf("mkdir failed\n"); return; }
+    kprintf("created %s/\n", path);
+}
+
+static void cmd_rm(const char *path)
+{
+    if (!have_mount) { kprintf("nothing mounted\n"); return; }
+    if (!path || !*path) { kprintf("usage: rm <path>\n"); return; }
+    if (fat_unlink(&mounted_fs, path) < 0) { kprintf("rm failed\n"); return; }
+    kprintf("removed %s\n", path);
+}
+
+static void cmd_rmdir(const char *path)
+{
+    if (!have_mount) { kprintf("nothing mounted\n"); return; }
+    if (!path || !*path) { kprintf("usage: rmdir <path>\n"); return; }
+    if (fat_rmdir(&mounted_fs, path) < 0) { kprintf("rmdir failed (not a dir or not empty)\n"); return; }
+    kprintf("removed %s/\n", path);
+}
+
+/* wilinstall: planner only. Walks through what an install would do
+ * but never touches the disk. Real install lives behind a typed
+ * confirmation token that this command does NOT yet honour. */
+static void cmd_wilinstall(const char *arg)
+{
+    unsigned drive, part;
+    char *sp = (char *)arg;
+    if (!arg || parse_uint(sp, &drive) < 0) {
+        kprintf("usage: wilinstall <drive> <part>\n");
+        return;
+    }
+    while (*sp && *sp != ' ') sp++;
+    while (*sp == ' ') sp++;
+    if (parse_uint(sp, &part) < 0) {
+        kprintf("usage: wilinstall <drive> <part>\n");
+        return;
+    }
+
+    if (drive >= ata_drive_count()) { kprintf("no such drive\n"); return; }
+
+    const ata_drive_t *d = ata_drive(drive);
+    part_table_t pt;
+    part_scan(drive, &pt);
+    if (part >= pt.count || !pt.parts[part].used) {
+        kprintf("no such partition\n");
+        return;
+    }
+    const partition_t *p = &pt.parts[part];
+
+    vga_set_color(VGA_LIGHT_MAGENTA, VGA_BLACK);
+    kprintf("\n  WilOS install plan (preview, no changes)\n\n");
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+    kprintf("  Target drive    : %u  (%s, %u MiB)\n",
+            drive, d->model, (unsigned)((d->sectors * 512ULL) / (1024 * 1024)));
+    kprintf("  Target partition: %u  type=%s  %u MiB\n",
+            part, p->type_name, (unsigned)((p->lba_count * 512ULL) / (1024 * 1024)));
+    if (p->gpt_name[0]) kprintf("  GPT name        : %s\n", p->gpt_name);
+    kprintf("\n  Steps that would run:\n");
+    kprintf("    1. Verify target is FAT32 and not the active OS volume\n");
+    kprintf("    2. Mount target partition\n");
+    kprintf("    3. mkdir /EFI /EFI/BOOT /EFI/wilos\n");
+    kprintf("    4. write /EFI/wilos/wilos.elf  (kernel image)\n");
+    kprintf("    5. write /EFI/wilos/grub.cfg   (boot menu)\n");
+    kprintf("    6. write /EFI/BOOT/BOOTX64.EFI (GRUB chainloader)\n");
+    kprintf("    7. Add UEFI boot entry         (EFI variable)\n");
+
+    vga_set_color(VGA_LIGHT_RED, VGA_BLACK);
+    kprintf("\n  Real install is gated behind a typed confirmation\n");
+    kprintf("  token that this build does not yet accept. Coming in\n");
+    kprintf("  phase 1.2. Your disk has not been touched.\n\n");
+    vga_set_color(VGA_LIGHT_GREY, VGA_BLACK);
+}
+
 static void execute(char *line)
 {
     while (*line == ' ') line++;
@@ -275,6 +376,11 @@ static void execute(char *line)
     else if (!strcmp(line, "umount"))  cmd_umount();
     else if (!strcmp(line, "ls"))      cmd_ls(arg);
     else if (!strcmp(line, "cat"))     cmd_cat(arg);
+    else if (!strcmp(line, "write"))   cmd_write(arg);
+    else if (!strcmp(line, "mkdir"))   cmd_mkdir(arg);
+    else if (!strcmp(line, "rm"))      cmd_rm(arg);
+    else if (!strcmp(line, "rmdir"))   cmd_rmdir(arg);
+    else if (!strcmp(line, "wilinstall")) cmd_wilinstall(arg);
     else if (!strcmp(line, "reboot"))  cmd_reboot();
     else if (!strcmp(line, "panic"))   panic("user-requested panic");
     else                               kprintf("unknown command: %s\n", line);

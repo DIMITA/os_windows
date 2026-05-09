@@ -27,9 +27,13 @@
 #define ATA_SR_DRQ  0x08
 #define ATA_SR_ERR  0x01
 
-#define ATA_CMD_READ_PIO       0x20
-#define ATA_CMD_READ_PIO_EXT   0x24
-#define ATA_CMD_IDENTIFY       0xEC
+#define ATA_CMD_READ_PIO        0x20
+#define ATA_CMD_READ_PIO_EXT    0x24
+#define ATA_CMD_WRITE_PIO       0x30
+#define ATA_CMD_WRITE_PIO_EXT   0x34
+#define ATA_CMD_CACHE_FLUSH     0xE7
+#define ATA_CMD_CACHE_FLUSH_EXT 0xEA
+#define ATA_CMD_IDENTIFY        0xEC
 #define ATA_CMD_IDENTIFY_PACKET 0xA1
 
 static ata_drive_t drives[ATA_MAX_DRIVES];
@@ -210,4 +214,72 @@ int ata_read(size_t i, uint64_t lba, size_t count, void *buf)
         if (rc) return -1;
     }
     return 0;
+}
+
+static int write_one_28(const ata_drive_t *d, uint32_t lba, const void *buf)
+{
+    uint16_t io = d->io_base;
+
+    if (wait_not_busy(io) < 0) return -1;
+    outb(io + ATA_REG_HDDEVSEL,
+         (d->slave ? 0xF0 : 0xE0) | ((lba >> 24) & 0x0F));
+    ata_io_wait(d->ctrl_base);
+    outb(io + ATA_REG_SECCOUNT0, 1);
+    outb(io + ATA_REG_LBA0, lba & 0xFF);
+    outb(io + ATA_REG_LBA1, (lba >> 8) & 0xFF);
+    outb(io + ATA_REG_LBA2, (lba >> 16) & 0xFF);
+    outb(io + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO);
+
+    if (wait_drq(io) < 0) return -1;
+    const uint16_t *p = (const uint16_t *)buf;
+    for (int i = 0; i < 256; i++) outw(io + ATA_REG_DATA, p[i]);
+    return 0;
+}
+
+static int write_one_48(const ata_drive_t *d, uint64_t lba, const void *buf)
+{
+    uint16_t io = d->io_base;
+
+    if (wait_not_busy(io) < 0) return -1;
+    outb(io + ATA_REG_HDDEVSEL, d->slave ? 0x50 : 0x40);
+    ata_io_wait(d->ctrl_base);
+
+    outb(io + ATA_REG_SECCOUNT0, 0);
+    outb(io + ATA_REG_LBA0, (lba >> 24) & 0xFF);
+    outb(io + ATA_REG_LBA1, (lba >> 32) & 0xFF);
+    outb(io + ATA_REG_LBA2, (lba >> 40) & 0xFF);
+    outb(io + ATA_REG_SECCOUNT0, 1);
+    outb(io + ATA_REG_LBA0, lba & 0xFF);
+    outb(io + ATA_REG_LBA1, (lba >> 8) & 0xFF);
+    outb(io + ATA_REG_LBA2, (lba >> 16) & 0xFF);
+    outb(io + ATA_REG_COMMAND, ATA_CMD_WRITE_PIO_EXT);
+
+    if (wait_drq(io) < 0) return -1;
+    const uint16_t *p = (const uint16_t *)buf;
+    for (int i = 0; i < 256; i++) outw(io + ATA_REG_DATA, p[i]);
+    return 0;
+}
+
+static int cache_flush(const ata_drive_t *d)
+{
+    uint16_t io = d->io_base;
+    outb(io + ATA_REG_COMMAND,
+         d->lba48 ? ATA_CMD_CACHE_FLUSH_EXT : ATA_CMD_CACHE_FLUSH);
+    return wait_not_busy(io);
+}
+
+int ata_write(size_t i, uint64_t lba, size_t count, const void *buf)
+{
+    const ata_drive_t *d = ata_drive(i);
+    if (!d || d->atapi) return -1;
+    if (lba + count > d->sectors) return -1;
+
+    const uint8_t *in = (const uint8_t *)buf;
+    for (size_t s = 0; s < count; s++) {
+        int rc = d->lba48
+            ? write_one_48(d, lba + s, in + s * ATA_SECTOR_SIZE)
+            : write_one_28(d, (uint32_t)(lba + s), in + s * ATA_SECTOR_SIZE);
+        if (rc) return -1;
+    }
+    return cache_flush(d);
 }
