@@ -1,5 +1,6 @@
 mod audit_cmd;
 mod chat;
+mod chat_socket;
 mod schema;
 
 use anyhow::Result;
@@ -28,6 +29,13 @@ enum Cmd {
         /// Override the configured provider.
         #[arg(long)]
         provider: Option<String>,
+        /// Use the running wilai-daemon over its Unix socket. Auto-detects
+        /// the default path; pass --socket to override.
+        #[arg(long)]
+        daemon: bool,
+        /// Path to the daemon socket. Implies --daemon.
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
     },
     /// Audit log inspection.
     Audit {
@@ -69,7 +77,18 @@ async fn main() -> Result<()> {
         .init();
 
     match cli.cmd {
-        Cmd::Chat { once, model, provider } => chat::run(once, model, provider).await,
+        Cmd::Chat { once, model, provider, daemon, socket } => {
+            let use_socket = daemon || socket.is_some();
+            if use_socket {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                chat_socket::run(&path, once).await
+            } else {
+                chat::run(once, model, provider).await
+            }
+        }
         Cmd::Audit { sub } => match sub {
             AuditCmd::Tail { n } => audit_cmd::tail(n),
             AuditCmd::Show { session } => audit_cmd::show(&session),

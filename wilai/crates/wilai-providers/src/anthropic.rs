@@ -1,7 +1,7 @@
 use crate::provider::{
     AssistantMessage, ChatRequest, ChatResponse, Message, MessageRole, Provider, ToolCall,
 };
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -232,7 +232,3 @@ fn build_messages(input: &[Message]) -> Vec<AnthropicMessage> {
     out
 }
 
-#[cfg(test)]
-fn _silence_unused() {
-    let _ = anyhow!("");
-}
