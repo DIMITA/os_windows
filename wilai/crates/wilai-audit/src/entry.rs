@@ -48,6 +48,13 @@ pub enum EntryPayload {
         reason: String,
         guard: String,
     },
+    ToolConfirm {
+        tool_name: String,
+        args: Value,
+        prompt: String,
+        answer: String,
+        latency_ms: u64,
+    },
     ProviderCall {
         provider: String,
         model: String,
@@ -80,6 +87,7 @@ impl EntryPayload {
             EntryPayload::SessionEnd => "session.end",
             EntryPayload::ToolExec { .. } => "tool.exec",
             EntryPayload::ToolDeny { .. } => "tool.deny",
+            EntryPayload::ToolConfirm { .. } => "tool.confirm",
             EntryPayload::ProviderCall { .. } => "provider.call",
             EntryPayload::ModeChange { .. } => "mode.change",
             EntryPayload::SystemDaemonStart => "system.daemon_start",
@@ -138,6 +146,15 @@ impl EntryPayload {
                 "reason": reason,
                 "guard": guard,
             }),
+            EntryPayload::ToolConfirm { tool_name, args, prompt, answer, latency_ms } => {
+                serde_json::json!({
+                    "tool": { "name": tool_name },
+                    "args": args,
+                    "prompt": prompt,
+                    "answer": answer,
+                    "latency_ms": latency_ms,
+                })
+            }
             EntryPayload::ProviderCall {
                 provider, model, prompt_tokens, output_tokens, duration_ms,
                 n_tools, n_messages, error,

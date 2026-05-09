@@ -8,6 +8,8 @@ use wilai_core::{types::new_ulid, Mode};
 use wilai_providers::{
     ChatRequest, Message, MessageRole, OllamaProvider, Provider, ToolCall,
 };
+use wilai_tools::confirm::{ConfirmAnswer, ConfirmDefault, Confirmer, TtyConfirmer};
+use wilai_tools::guards::{evaluate, GuardOutcome};
 use wilai_tools::{Executor, Registry};
 
 const MAX_TOOL_TURNS: usize = 8;
@@ -22,6 +24,8 @@ pub async fn run(once: Option<String>, model: Option<String>, provider: Option<S
     let provider_name = provider.unwrap_or(cfg.general.default_provider.clone());
     let model = model.unwrap_or(cfg.general.default_model.clone());
     let provider = build_provider(&provider_name, &cfg)?;
+    let confirmer: Box<dyn Confirmer> = Box::new(TtyConfirmer);
+    let confirm_timeout_s = cfg.general.confirm_timeout_s;
 
     let audit_dir = cfg
         .audit
@@ -58,6 +62,8 @@ pub async fn run(once: Option<String>, model: Option<String>, provider: Option<S
             &system_prompt,
             &mut history,
             prompt,
+            &*confirmer,
+            confirm_timeout_s,
         )
         .await
     } else {
@@ -69,6 +75,8 @@ pub async fn run(once: Option<String>, model: Option<String>, provider: Option<S
             &session,
             &system_prompt,
             &mut history,
+            &*confirmer,
+            confirm_timeout_s,
         )
         .await
     };
@@ -130,10 +138,12 @@ async fn run_interactive(
     session: &str,
     system_prompt: &str,
     history: &mut Vec<Message>,
+    confirmer: &dyn Confirmer,
+    confirm_timeout_s: u32,
 ) -> Result<()> {
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
-    println!("Wilai v0.5 - {} via {}. Ctrl-D to quit.", model, provider.name());
+    println!("Wilai v0.6 - {} via {}. Ctrl-D to quit.", model, provider.name());
     loop {
         {
             let mut h = stdout.lock();
@@ -155,6 +165,7 @@ async fn run_interactive(
         }
         if let Err(e) = run_turn(
             provider, model, registry, audit, session, system_prompt, history, prompt,
+            confirmer, confirm_timeout_s,
         )
         .await
         {
@@ -173,6 +184,8 @@ async fn run_turn(
     system_prompt: &str,
     history: &mut Vec<Message>,
     user_text: String,
+    confirmer: &dyn Confirmer,
+    confirm_timeout_s: u32,
 ) -> Result<()> {
     history.push(Message {
         role: MessageRole::User,
@@ -268,6 +281,8 @@ async fn run_turn(
                 provider.name(),
                 model,
                 &turn_id,
+                confirmer,
+                confirm_timeout_s,
             )
             .await;
             match result {
@@ -313,25 +328,12 @@ async fn execute_call(
     provider_name: &str,
     model: &str,
     turn_id: &str,
+    confirmer: &dyn Confirmer,
+    confirm_timeout_s: u32,
 ) -> Result<String> {
     let spec = registry
         .get(&tc.name)
         .ok_or_else(|| anyhow!("unknown tool: {}", tc.name))?;
-
-    if matches!(spec.risk, wilai_core::Risk::High | wilai_core::Risk::Critical) {
-        let reason = format!("risk {} requires confirmation, not implemented in v0.5", spec.risk);
-        audit.write(WriteRequest {
-            session: session.to_string(),
-            mode: Mode::Normal,
-            payload: EntryPayload::ToolDeny {
-                tool_name: tc.name.clone(),
-                args: tc.arguments.clone(),
-                reason: reason.clone(),
-                guard: format!("risk={}", spec.risk),
-            },
-        })?;
-        return Err(anyhow!(reason));
-    }
 
     let validated = match wilai_tools::validator::validate_args(spec, &tc.arguments) {
         Ok(v) => v,
@@ -350,6 +352,48 @@ async fn execute_call(
             return Err(anyhow!(reason));
         }
     };
+
+    match evaluate(spec, &validated, Mode::Normal)? {
+        GuardOutcome::Allow => {}
+        GuardOutcome::Deny { reason, guard } => {
+            audit.write(WriteRequest {
+                session: session.to_string(),
+                mode: Mode::Normal,
+                payload: EntryPayload::ToolDeny {
+                    tool_name: spec.name.clone(),
+                    args: validated.clone(),
+                    reason: reason.clone(),
+                    guard,
+                },
+            })?;
+            return Err(anyhow!(reason));
+        }
+        GuardOutcome::Confirm { prompt, default_no, guard: _ } => {
+            let default = if default_no { ConfirmDefault::No } else { ConfirmDefault::Yes };
+            let start = Instant::now();
+            let answer = confirmer.ask(&prompt, default, confirm_timeout_s).await?;
+            let latency_ms = start.elapsed().as_millis() as u64;
+            let answer_str = match answer {
+                ConfirmAnswer::Yes => "yes",
+                ConfirmAnswer::No => "no",
+                ConfirmAnswer::Timeout => "timeout",
+            };
+            audit.write(WriteRequest {
+                session: session.to_string(),
+                mode: Mode::Normal,
+                payload: EntryPayload::ToolConfirm {
+                    tool_name: spec.name.clone(),
+                    args: validated.clone(),
+                    prompt: prompt.clone(),
+                    answer: answer_str.to_string(),
+                    latency_ms,
+                },
+            })?;
+            if !matches!(answer, ConfirmAnswer::Yes) {
+                return Err(anyhow!("confirmation refused: {prompt}"));
+            }
+        }
+    }
 
     let result = Executor::run(spec, &validated).await?;
 

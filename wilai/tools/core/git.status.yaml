@@ -1,0 +1,27 @@
+name: git.status
+version: 1
+description: Show the working tree status of a git repository.
+category: read
+risk: none
+
+inputs:
+  cwd:
+    type: string
+    pattern: path
+    default: "."
+    description: Path to the repository (any subdirectory works).
+
+executor:
+  type: subprocess
+  cmd: ["git", "-C", "{cwd}", "status", "--short", "--branch"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 65536
+
+audit:
+  fields: [cwd]
+
+examples:
+  - args: { cwd: "." }
+    note: "Status of the current directory's repo."

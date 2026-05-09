@@ -7,9 +7,40 @@ pub async fn dispatch(name: &str, args: &Value) -> Result<String> {
     match name {
         "fs.read.v1" => fs_read(args).await,
         "fs.list.v1" => fs_list(args).await,
+        "fs.write.v1" => fs_write(args).await,
         "sysinfo.get.v1" => sysinfo_get(args).await,
         other => Err(anyhow!("unknown builtin: {other}")),
     }
+}
+
+async fn fs_write(args: &Value) -> Result<String> {
+    let path = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("fs.write: path missing"))?;
+    let content = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("fs.write: content missing"))?;
+    let create_only = args
+        .get("create_only")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let p = expand_tilde(path);
+
+    if create_only && p.exists() {
+        return Err(anyhow!("fs.write: {} already exists", p.display()));
+    }
+
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("create_dir_all {}", parent.display()))?;
+        }
+    }
+
+    fs::write(&p, content).with_context(|| format!("write {}", p.display()))?;
+    Ok(format!("wrote {} bytes to {}\n", content.len(), p.display()))
 }
 
 async fn fs_read(args: &Value) -> Result<String> {

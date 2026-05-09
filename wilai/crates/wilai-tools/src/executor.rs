@@ -133,11 +133,21 @@ fn render_argv(template: &[String], args: &Value) -> Result<Vec<String>> {
             let v = obj
                 .get(name)
                 .ok_or_else(|| anyhow::anyhow!("placeholder {name} missing"))?;
-            let s = value_to_token(v)?;
-            if s.contains('\n') {
-                bail!("rendered token contains newline");
+            if let Value::Array(arr) = v {
+                for item in arr {
+                    let s = value_to_token(item)?;
+                    if s.contains('\n') {
+                        bail!("rendered token contains newline");
+                    }
+                    out.push(s);
+                }
+            } else {
+                let s = value_to_token(v)?;
+                if s.contains('\n') {
+                    bail!("rendered token contains newline");
+                }
+                out.push(s);
             }
-            out.push(s);
         } else if tok.contains('{') && tok.contains('}') {
             let mut rendered = String::with_capacity(tok.len());
             let mut chars = tok.chars().peekable();

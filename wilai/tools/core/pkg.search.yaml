@@ -1,0 +1,26 @@
+name: pkg.search
+version: 1
+description: Search the pacman package database by name or description fragment.
+category: read
+risk: none
+
+inputs:
+  query:
+    type: string
+    required: true
+    description: Search pattern (regex per pacman -Ss).
+
+executor:
+  type: subprocess
+  cmd: ["pacman", "-Ss", "{query}"]
+  timeout_s: 30
+  output:
+    capture: stdout
+    max_bytes: 131072
+
+audit:
+  fields: [query]
+
+examples:
+  - args: { query: "hyprland" }
+    note: "Search for hyprland-related packages."
