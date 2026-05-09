@@ -4,14 +4,32 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 use wilai_daemon::protocol::{ClientOp, ServerEvent};
 
-pub async fn show(socket: &Path) -> Result<()> {
-    let mut stream = connect(socket).await?;
+pub async fn show(socket: &Path, json: bool) -> Result<()> {
+    let mut stream = match connect(socket).await {
+        Ok(s) => s,
+        Err(e) => {
+            // For status-bar consumers: emit a structured "down" signal
+            // instead of an error so polling stays cheap.
+            if json {
+                println!(r#"{{"mode":"down","pentest_in_flight":0,"reason":"{}"}}"#,
+                    e.to_string().replace('"', "'"));
+                return Ok(());
+            }
+            return Err(e);
+        }
+    };
     write_op(&mut stream, &ClientOp::ModeGet).await?;
     let ev = next_event_skipping_session(&mut stream).await?;
     match ev {
         ServerEvent::Mode { current, pentest_in_flight } => {
-            println!("mode: {current}");
-            println!("pentest_in_flight: {pentest_in_flight}");
+            if json {
+                println!(
+                    r#"{{"mode":"{current}","pentest_in_flight":{pentest_in_flight}}}"#
+                );
+            } else {
+                println!("mode: {current}");
+                println!("pentest_in_flight: {pentest_in_flight}");
+            }
         }
         ServerEvent::Error { message } => return Err(anyhow!("daemon: {message}")),
         other => return Err(anyhow!("unexpected event: {:?}", other)),

@@ -3,6 +3,7 @@ mod chat;
 mod chat_socket;
 mod mode_cmd;
 mod schema;
+mod tool_authoring;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -61,6 +62,10 @@ enum ModeCmd {
     Show {
         #[arg(long)]
         socket: Option<std::path::PathBuf>,
+        /// Emit a single line of JSON instead of a human-readable form.
+        /// Suitable for poll-based status bars.
+        #[arg(long)]
+        json: bool,
     },
     /// Switch the daemon to <mode> (normal | pentest).
     Set {
@@ -89,6 +94,32 @@ enum AuditCmd {
 enum ToolCmd {
     /// List loaded tools.
     List,
+    /// Scaffold a new tool YAML at the given path.
+    New {
+        /// Dotted name of the tool (e.g. "fs.snapshot").
+        name: String,
+        /// Output path. Defaults to ~/.config/wilai/tools/<name>.yaml.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Category to use in the scaffold.
+        #[arg(long, default_value = "read")]
+        category: String,
+        /// Risk level to use in the scaffold.
+        #[arg(long, default_value = "none")]
+        risk: String,
+    },
+    /// Validate a tool YAML against the meta-schema.
+    Validate {
+        path: std::path::PathBuf,
+    },
+    /// Render the executor's argv (subprocess) or builtin call (builtin)
+    /// without executing the tool. Args come from --args (JSON object).
+    DryRun {
+        path: std::path::PathBuf,
+        /// JSON object of arguments. Default: {}.
+        #[arg(long, default_value = "{}")]
+        args: String,
+    },
 }
 
 #[tokio::main]
@@ -119,14 +150,19 @@ async fn main() -> Result<()> {
         },
         Cmd::Tool { sub } => match sub {
             ToolCmd::List => list_tools(),
+            ToolCmd::New { name, out, category, risk } => {
+                tool_authoring::new(&name, out.as_deref(), &category, &risk)
+            }
+            ToolCmd::Validate { path } => tool_authoring::validate(&path),
+            ToolCmd::DryRun { path, args } => tool_authoring::dry_run(&path, &args),
         },
         Cmd::Mode { sub } => match sub {
-            ModeCmd::Show { socket } => {
+            ModeCmd::Show { socket, json } => {
                 let path = match socket {
                     Some(p) => p,
                     None => wilai_daemon::service::default_socket_path()?,
                 };
-                mode_cmd::show(&path).await
+                mode_cmd::show(&path, json).await
             }
             ModeCmd::Set { mode, socket, trigger } => {
                 let path = match socket {

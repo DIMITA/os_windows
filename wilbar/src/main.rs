@@ -69,6 +69,18 @@ window#wilbar {
 .wilbar-status    { padding: 0 8px; }
 .wilbar-status-warn  { color: #FFD580; }
 .wilbar-status-crit  { color: #FF8A8A; }
+.wilbar-wilai {
+    padding: 0 10px;
+    border-radius: 10px;
+    color: rgba(236, 238, 246, 0.85);
+    background: rgba(255, 255, 255, 0.04);
+}
+.wilbar-wilai-pentest {
+    color: #FFFFFF;
+    background: rgba(255, 90, 90, 0.30);
+    border: 1px solid rgba(255, 138, 138, 0.55);
+}
+.wilbar-wilai-down { color: rgba(236, 238, 246, 0.30); }
 "#;
 
 // ---------- Hyprland IPC -------------------------------------------------- //
@@ -356,6 +368,71 @@ fn build_brightness(parent: &GtkBox) {
     });
 }
 
+fn build_wilai_mode(parent: &GtkBox) {
+    let lbl = Label::new(Some(""));
+    lbl.add_css_class("wilbar-wilai");
+    parent.append(&lbl);
+
+    let lbl_t = lbl.clone();
+    let tick = move || {
+        // Poll the daemon over its socket via `wilai mode show --json`.
+        // Falls back to "down" if the daemon is not running, which is a
+        // valid steady state on machines where wilai is not enabled.
+        let out = Command::new("wilai")
+            .args(["mode", "show", "--json"])
+            .output();
+        let (mode, in_flight, ok) = match out {
+            Ok(o) if o.status.success() => {
+                let s = String::from_utf8_lossy(&o.stdout);
+                parse_wilai_json(&s)
+            }
+            _ => ("down".to_string(), 0u64, false),
+        };
+        let glyph = match mode.as_str() {
+            "pentest" => "",
+            "normal" => "",
+            _ => "",
+        };
+        let body = if in_flight > 0 {
+            format!("{glyph} {mode} ({in_flight})")
+        } else {
+            format!("{glyph} {mode}")
+        };
+        lbl_t.set_label(&body);
+        lbl_t.remove_css_class("wilbar-wilai-pentest");
+        lbl_t.remove_css_class("wilbar-wilai-down");
+        if !ok {
+            lbl_t.add_css_class("wilbar-wilai-down");
+        } else if mode == "pentest" {
+            lbl_t.add_css_class("wilbar-wilai-pentest");
+        }
+    };
+    tick();
+    glib::timeout_add_local(Duration::from_secs(3), move || {
+        tick();
+        glib::ControlFlow::Continue
+    });
+}
+
+fn parse_wilai_json(s: &str) -> (String, u64, bool) {
+    // Very small parser since wilbar avoids serde_json.
+    // Accepts {"mode":"<m>","pentest_in_flight":<n>} plus a "down" form
+    // that includes a "reason" field. Anything malformed is treated as down.
+    let mode = extract_string(s, "\"mode\":");
+    let in_flight = extract_int_field(s, "\"pentest_in_flight\":").unwrap_or(0).max(0) as u64;
+    let ok = matches!(mode.as_deref(), Some("normal" | "pentest"));
+    (mode.unwrap_or_else(|| "down".to_string()), in_flight, ok)
+}
+
+fn extract_string(json: &str, key: &str) -> Option<String> {
+    let i = json.find(key)?;
+    let rest = &json[i + key.len()..];
+    let q1 = rest.find('"')?;
+    let after = &rest[q1 + 1..];
+    let q2 = after.find('"')?;
+    Some(after[..q2].to_string())
+}
+
 fn build_network(parent: &GtkBox) {
     let lbl = Label::new(Some(""));
     lbl.add_css_class("wilbar-status");
@@ -447,6 +524,7 @@ fn build_ui(app: &Application) {
 
     build_clock(&center);
 
+    build_wilai_mode(&right);
     build_audio(&right);
     build_brightness(&right);
     build_battery(&right);

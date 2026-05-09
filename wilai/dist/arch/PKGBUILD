@@ -1,0 +1,58 @@
+# Maintainer: WilOS Aurora <maintainer@wilos.example>
+pkgname=wilai
+pkgver=0.9.0
+pkgrel=1
+pkgdesc="Wilai system agent for WilOS Aurora: typed-tool LLM driver with hash-chained audit"
+arch=('x86_64')
+url='https://github.com/dimita/os_windows'
+license=('MIT' 'Apache')
+depends=('gcc-libs' 'glibc')
+optdepends=(
+    'ollama: local LLM runtime (default provider)'
+    'whisper.cpp: speech-to-text engine for wilai-voice'
+    'piper-tts: text-to-speech engine for wilai-voice'
+    'alsa-utils: arecord/aplay used by wilai-voice'
+    'libnotify: notify-send used by wilai-overlay'
+    'zenity: prompt/confirm dialogs used by wilai-overlay'
+    'nmap: pentest tool driven by tools/pentest/nmap.scan.yaml'
+    'nuclei: pentest tool driven by tools/pentest/nuclei.run.yaml'
+    'whatweb: pentest tool driven by tools/pentest/whatweb.scan.yaml'
+)
+makedepends=('rust' 'cargo')
+source=()
+sha256sums=()
+
+# Built from the in-tree workspace at $startdir/../..
+# In a real release this PKGBUILD would point at a tagged tarball; for the
+# WilOS ISO build it's invoked with $srcdir already prepared.
+
+build() {
+    cd "$startdir/../.."
+    cargo build --release --frozen
+}
+
+package() {
+    cd "$startdir/../.."
+    install -Dm755 target/release/wilai          "$pkgdir/usr/bin/wilai"
+    install -Dm755 target/release/wilai-daemon   "$pkgdir/usr/bin/wilai-daemon"
+    install -Dm755 target/release/wilai-voice    "$pkgdir/usr/bin/wilai-voice"
+    install -Dm755 target/release/wilai-overlay  "$pkgdir/usr/bin/wilai-overlay"
+
+    # Ship the entire tools/ tree (core/ + pentest/ subdirs).
+    install -d "$pkgdir/usr/share/wilai/tools/core"
+    install -d "$pkgdir/usr/share/wilai/tools/pentest"
+    install -Dm644 tools/core/*.yaml    "$pkgdir/usr/share/wilai/tools/core/"
+    install -Dm644 tools/pentest/*.yaml "$pkgdir/usr/share/wilai/tools/pentest/"
+
+    # Example config and systemd user unit.
+    install -Dm644 config/wilai.toml.example \
+        "$pkgdir/usr/share/wilai/wilai.toml.example"
+    install -Dm644 dist/systemd/wilai.service \
+        "$pkgdir/usr/lib/systemd/user/wilai.service"
+
+    # Docs.
+    install -Dm644 README.md           "$pkgdir/usr/share/doc/wilai/README.md"
+    install -Dm644 docs/architecture.md "$pkgdir/usr/share/doc/wilai/architecture.md"
+    install -Dm644 docs/tool-format.md  "$pkgdir/usr/share/doc/wilai/tool-format.md"
+    install -Dm644 docs/audit-format.md "$pkgdir/usr/share/doc/wilai/audit-format.md"
+}

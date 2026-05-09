@@ -37,6 +37,20 @@ bind = SUPER, GRAVE,        exec, wilai-overlay --ask
 bind = SUPER, F12,          exec, wilai-voice  # push-to-talk in a small terminal
 ```
 
+## Arch package
+
+`dist/arch/PKGBUILD` builds and installs all four binaries (`wilai`,
+`wilai-daemon`, `wilai-voice`, `wilai-overlay`), the YAML tool registry
+under `/usr/share/wilai/tools/{core,pentest}/`, the example config, the
+systemd user unit, and the design docs. Optional dependencies cover the
+external engines used by `wilai-voice` and `wilai-overlay` plus the
+pentest binaries.
+
+```sh
+cd dist/arch
+makepkg -si
+```
+
 ## Voice engines
 
 `wilai-voice` shells out to user-provided binaries. Recommended setup:
