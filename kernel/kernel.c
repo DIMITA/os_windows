@@ -12,6 +12,7 @@
 #include <wilos/paging.h>
 #include <wilos/shell.h>
 #include <wilos/panic.h>
+#include <wilos/ata.h>
 
 extern uint8_t __kernel_end[];
 
@@ -61,6 +62,9 @@ void kmain(uint32_t magic, multiboot_info_t *mbi)
 
     paging_init();
     kprintf("[ok] paging (identity-mapped low 16 MiB)\n");
+
+    ata_init();
+    kprintf("[ok] ata: %u drive(s) detected\n", (unsigned)ata_drive_count());
 
     banner();
     shell_run();

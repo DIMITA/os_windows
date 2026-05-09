@@ -44,6 +44,9 @@ C_SOURCES := \
   kernel/drivers/serial.c \
   kernel/drivers/keyboard.c \
   kernel/drivers/pit.c \
+  kernel/drivers/ata.c \
+  kernel/fs/part.c \
+  kernel/fs/fat.c \
   kernel/mm/pmm.c \
   kernel/mm/heap.c \
   kernel/lib/string.c \

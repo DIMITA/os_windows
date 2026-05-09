@@ -17,7 +17,33 @@ something useful on their own.
 - [x] Freestanding libk: `string.h`, `printf`, `panic`
 - [x] In-kernel debug shell (`help`, `mem`, `uptime`, `reboot`, …)
 
-## Phase 1 — Real OS kernel
+## Phase 1.0 — Storage stack (this commit)
+
+- [x] ATA PIO driver: primary/secondary, master/slave, LBA28 + LBA48
+- [x] MBR partition table parser
+- [x] GPT partition table parser (with protective MBR detection)
+- [x] FAT16 / FAT32 read-only with VFAT long file names
+- [x] Shell commands: `disks`, `parts`, `mount`, `umount`, `ls`, `cat`
+
+## Phase 1.1 — Write path + installer
+
+- [ ] FAT16/FAT32 write support (cluster allocation, FAT update, dir
+      mutation, `mkdir` / `cp` / `rm`)
+- [ ] Writable block device abstraction with sector cache
+- [ ] AHCI driver (modern SATA controllers in non-legacy mode)
+- [ ] NVMe driver (M.2 SSDs)
+- [ ] **wilinstall** : guided text installer
+      - lists candidate disks and refuses to write without typed-in
+        `YES, ERASE diskN` confirmation
+      - shrinks an existing partition or claims free space
+      - formats the target as the WilOS native filesystem (FAT32 in
+        1.1, journaled `wilfs` later)
+      - copies the kernel + GRUB to an EFI System Partition
+      - installs the GRUB chainloader without touching the existing
+        Windows entry (dual-boot first, replace-only later and only
+        on explicit request)
+
+## Phase 1.2 — Real OS kernel
 
 - [ ] Higher-half kernel at `0xC0000000`, demand-paged kernel heap
 - [ ] Buddy/PMM rework + slab allocator
@@ -26,7 +52,7 @@ something useful on their own.
 - [ ] System call interface (`int 0x80` then `syscall`)
 - [ ] ELF32/ELF64 user binary loader
 - [ ] VFS layer with `ramfs`, `devfs`, `tmpfs`
-- [ ] FAT32 driver (read+write), then a journaled native FS
+- [ ] Native journaled FS (`wilfs`)
 - [ ] x86_64 port (long mode trampoline, new linker layout)
 - [ ] ACPI bring-up, APIC instead of PIC, HPET instead of PIT
 
