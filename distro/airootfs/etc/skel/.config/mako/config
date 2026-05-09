@@ -1,0 +1,23 @@
+# WilOS Aurora — notification daemon
+sort=-time
+layer=overlay
+anchor=top-right
+margin=12,12,0,0
+padding=14,18
+border-size=1
+border-radius=14
+default-timeout=6000
+ignore-timeout=1
+font=Inter 11
+
+background-color=#15151ECC
+text-color=#ECEEF6
+border-color=#FFFFFF1A
+progress-color=over #7CC8FF66
+
+[urgency=high]
+border-color=#FF8A8A
+default-timeout=0
+
+[urgency=low]
+text-color=#ECEEF699

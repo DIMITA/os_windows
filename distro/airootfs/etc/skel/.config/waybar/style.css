@@ -1,0 +1,77 @@
+/* WilOS Aurora — top bar style.
+   Glassy translucent slab, 1px hairline, soft inner highlight on top. */
+
+* {
+    font-family: "Inter", "JetBrainsMono Nerd Font", sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+}
+
+window#waybar {
+    background: rgba(15, 15, 23, 0.55);
+    color: #ECEEF6;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+}
+
+#workspaces, #window, #clock, #tray, #network, #bluetooth, #pulseaudio,
+#backlight, #battery, #custom-logo, #custom-power {
+    padding: 0 10px;
+}
+
+#custom-logo {
+    color: #B198FF;
+    font-size: 16px;
+    padding-left: 14px;
+}
+
+#workspaces button {
+    color: rgba(236, 238, 246, 0.55);
+    padding: 0 6px;
+    transition: all 180ms ease;
+}
+#workspaces button:hover {
+    color: #FFFFFF;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+#workspaces button.active {
+    color: #7CC8FF;
+}
+#workspaces button.urgent {
+    color: #FF8A8A;
+}
+
+#window {
+    color: rgba(236, 238, 246, 0.85);
+    font-weight: 600;
+}
+
+#clock {
+    color: #FFFFFF;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    padding: 0 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 10px;
+    margin: 4px 0;
+}
+
+#network.disconnected,
+#battery.critical:not(.charging) { color: #FF8A8A; }
+
+#battery.warning:not(.charging)  { color: #FFD580; }
+
+#tray menu {
+    background: rgba(20, 20, 30, 0.85);
+    color: #ECEEF6;
+}
+
+#custom-power {
+    color: #FF8A8A;
+    padding-right: 14px;
+}

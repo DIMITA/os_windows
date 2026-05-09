@@ -1,0 +1,17 @@
+# WilOS Aurora — Spotlight-style launcher
+show=drun
+prompt=Search apps, files, settings...
+width=620
+height=440
+location=center
+allow_images=true
+image_size=32
+insensitive=true
+hide_scroll=true
+no_actions=true
+sort_order=alphabetical
+columns=1
+key_expand=Tab
+gtk_dark=true
+matching=fuzzy
+term=kitty

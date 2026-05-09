@@ -1,5 +1,7 @@
-build/
+out/
+work/
 *.iso
+*.img
 *.o
 *.elf
 *.bin

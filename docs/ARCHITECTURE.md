@@ -1,85 +1,88 @@
-# WilOS Architecture
+# WilOS Aurora — Architecture
 
-This document describes the structure of the WilOS kernel as it stands
-in phase 0 and the architectural choices that shape every later phase.
+WilOS is a Linux distribution: every layer below the shell is a
+component the wider Linux ecosystem already maintains. The novelty
+sits in the shell, the design system, and the install experience.
 
-## Layering
-
-```
-+-------------------------------------------------------------+
-|                     applications (future)                   |
-+-------------------------------------------------------------+
-|     glassmorphic shell  |  app frameworks  |  package mgr   |
-+-------------------------------------------------------------+
-|              compositor (Wil-Comp, Wayland-like)            |
-+-------------------------------------------------------------+
-|           userland services (init, login, audio, net)       |
-+-------------------------------------------------------------+
-|                           libwilos                          |
-+-------------------------------------------------------------+
-|                       syscall boundary                      |
-+=============================================================+
-|                     WilOS kernel (this repo)                |
-|   shell  |  vfs  |  scheduler  |  ipc  |  drivers  |  mm    |
-+-------------------------------------------------------------+
-|     arch (i386 today, x86_64 + aarch64 in later phases)     |
-+-------------------------------------------------------------+
-|                 firmware / bootloader (GRUB)                |
-+-------------------------------------------------------------+
-```
-
-The split between kernel space and user space follows a **hybrid**
-model — long-running drivers (graphics, network) will eventually move
-to userland in phase 2, while latency-critical paths (scheduler, VFS
-core, IPC) stay in the kernel.
-
-## Boot path
-
-1. GRUB loads `/boot/wilos.elf` per the multiboot 1 spec at 1 MiB.
-2. `boot/multiboot.S` sets up a 16 KiB boot stack and calls `kmain`
-   with the multiboot magic and info pointer on the stack.
-3. `kmain` (in `kernel/kernel.c`) initialises subsystems in order:
-   serial → VGA → GDT → IDT/PIC → PIT → keyboard → PMM → heap →
-   paging, then jumps into `shell_run`.
-
-## Subsystems (phase 0)
-
-| Subsystem | Files | Purpose |
-|-----------|-------|---------|
-| arch/i386 | `kernel/arch/i386/*` | CPU bring-up: GDT, IDT, ISR/IRQ stubs, PIC remap, identity paging |
-| drivers   | `kernel/drivers/*`   | VGA text, COM1 serial, PS/2 keyboard, 8253 PIT |
-| mm        | `kernel/mm/*`        | Bitmap PMM, first-fit kernel heap |
-| lib       | `kernel/lib/*`       | freestanding libc subset, kprintf, panic |
-| shell     | `kernel/shell/*`     | in-kernel debug shell |
-
-## Memory map (phase 0)
+## Layers
 
 ```
-0x00000000 - 0x000FFFFF   reserved (BIOS, low memory, VGA buffer)
-0x00100000 - kernel_end   kernel image (text/rodata/data/bss)
-kernel_end - +bitmap      PMM bitmap
-+heap_base - +1 MiB       kernel heap (kmalloc / kfree)
-above                     free pages, allocated by pmm_alloc_page
++-------------------------------------------------------------------+
+|  Shell — Aurora                                                   |
+|    Hyprland (Wayland compositor, blur + animations)               |
+|    Waybar × 2  (top menu bar, bottom dock)                        |
+|    wofi (Spotlight launcher)   mako (notifications)               |
+|    swww (wallpaper)            polkit-kde-agent (auth)            |
++-------------------------------------------------------------------+
+|  Userland                                                         |
+|    GNOME apps (Files, Text Editor, Calculator, Photos, ...)       |
+|    Firefox, Kitty, mpv, htop, fastfetch                           |
+|    NetworkManager, BlueZ, PipeWire, WirePlumber                   |
++-------------------------------------------------------------------+
+|  Session manager                                                  |
+|    greetd + tuigreet (login)                                      |
+|    systemd (services, sockets, timers)                            |
++-------------------------------------------------------------------+
+|  Base                                                             |
+|    Arch Linux base + base-devel                                   |
+|    Pacman (package manager)                                       |
+|    Btrfs root with @ / @home / @log / @cache / @snapshots         |
++-------------------------------------------------------------------+
+|  Kernel + drivers                                                 |
+|    Linux (latest stable) + linux-firmware                         |
+|    intel-ucode / amd-ucode                                        |
++-------------------------------------------------------------------+
+|  Bootloader                                                       |
+|    systemd-boot (UEFI) or GRUB                                    |
++-------------------------------------------------------------------+
 ```
 
-## Interrupt model
+## Build pipeline
 
-- Exceptions 0..31 are handled by `isr_dispatch` and call into
-  registered C handlers via `isr_register`. Unhandled exceptions
-  panic the kernel.
-- IRQs 0..15 are remapped to vectors 32..47 by reprogramming the dual
-  8259 PIC. Drivers register handlers with `irq_register`.
-- The PIT (IRQ0) drives `pit_ticks` and the future scheduler.
-- The PS/2 keyboard (IRQ1) feeds a small ring buffer consumed by
-  `keyboard_getc`.
+```
+  scripts/make-wallpaper.sh    →   distro/airootfs/usr/share/backgrounds/wilos/aurora.jpg
+  scripts/build-iso.sh         →   sudo mkarchiso -v distro/   →   out/wilos-*.iso
+  scripts/flash-usb.sh         →   sudo dd …
+                                                              ↓
+                                                  Live ISO booted on hardware
+                                                              ↓
+                                                  sudo wilos-install
+                                                              ↓
+                                                  Installed system on disk
+```
 
 ## Conventions
 
-- Kernel source uses C11 (`-std=gnu11`), no libc, `-ffreestanding`.
-- Public headers live under `kernel/include/wilos/` and are the only
-  surface other subsystems are allowed to depend on.
-- Anything that allocates memory must own the matching free path. The
-  PMM and the heap track usage so the `mem` shell command stays
-  truthful.
-- Asm stubs are paired with C dispatchers — never put logic in asm
-  unless the C compiler cannot express it.
+- The live system is *exactly* what gets installed: the same shell,
+  the same dotfiles in `/etc/skel`. There is no "live-only" theme.
+- Anything user-visible lives under `distro/airootfs/etc/skel/.config/`
+  so changes are picked up by both new live boots and freshly created
+  installed users.
+- The installer (`wilos-install`) **must** require a typed token
+  (`WIPE <disk>`) before any destructive operation, and **must**
+  refuse to write to the disk that backs the live ISO.
+- Aurora design tokens (colours, radii, motion) live in `docs/DESIGN.md`
+  and are mirrored in the relevant config files (Hyprland decoration,
+  Waybar CSS, wofi CSS, Kitty palette). When a token changes, every
+  surface changes in lock-step.
+
+## Where to look for what
+
+| You want to change…              | Edit…                                                      |
+|----------------------------------|------------------------------------------------------------|
+| Window radius / blur / shadows   | `distro/airootfs/etc/skel/.config/hypr/hyprland.conf`      |
+| Top bar layout / modules         | `distro/airootfs/etc/skel/.config/waybar/config.jsonc`     |
+| Top bar visual style             | `distro/airootfs/etc/skel/.config/waybar/style.css`        |
+| Dock icons / actions             | `distro/airootfs/etc/skel/.config/waybar/dock.jsonc`       |
+| Dock visual style                | `distro/airootfs/etc/skel/.config/waybar/dock.css`         |
+| Launcher                         | `distro/airootfs/etc/skel/.config/wofi/`                   |
+| Notifications                    | `distro/airootfs/etc/skel/.config/mako/config`             |
+| Terminal palette                 | `distro/airootfs/etc/skel/.config/kitty/kitty.conf`        |
+| Login screen prompt              | `distro/airootfs/etc/greetd/config.toml`                   |
+| Live packages                    | `distro/packages.x86_64`                                   |
+| Installed-system packages        | `distro/airootfs/etc/wilos/install-packages.list`          |
+| Installer flow                   | `distro/airootfs/usr/local/bin/wilos-install`              |
+| Wallpaper generator              | `scripts/make-wallpaper.sh`                                |
+| Boot menu (UEFI)                 | `distro/efiboot/loader/`                                   |
+| Boot menu (GRUB)                 | `distro/grub/grub.cfg`                                     |
+| Boot menu (BIOS / syslinux)      | `distro/syslinux/syslinux.cfg`                             |

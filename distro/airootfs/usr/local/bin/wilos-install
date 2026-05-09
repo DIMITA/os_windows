@@ -1,0 +1,233 @@
+#!/usr/bin/env bash
+# wilos-install — guided installation of WilOS to a disk.
+#
+# Two safety gates:
+#   1. The user must select a disk and confirm with `WIPE` typed
+#      exactly. We refuse anything else.
+#   2. We refuse to operate on the disk that hosts the running live
+#      filesystem.
+#
+# The installer is intentionally minimal: it pacstraps a base system
+# onto a freshly partitioned target, configures bootloader + locale +
+# user, and reboots.
+
+set -euo pipefail
+
+readonly RED='\033[1;31m'
+readonly GRN='\033[1;32m'
+readonly YEL='\033[1;33m'
+readonly BLU='\033[1;34m'
+readonly RST='\033[0m'
+
+banner() {
+    cat <<'EOF'
+
+   __        ___ _  ___  ____
+   \ \      / (_) |/ _ \/ ___|     installer
+    \ \ /\ / /| | | | | \___ \
+     \ V  V / | | | |_| |___) |
+      \_/\_/  |_|_|\___/|____/
+
+EOF
+}
+
+require_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}wilos-install must run as root.${RST} Try: sudo wilos-install"
+        exit 1
+    fi
+}
+
+live_disk() {
+    # The disk that backs / for the live ISO.
+    findmnt -no SOURCE / 2>/dev/null \
+        | sed 's/[0-9]\+$//; s/p$//' \
+        || true
+}
+
+list_disks() {
+    lsblk -dno NAME,SIZE,MODEL,TRAN \
+        | awk '$4 != "" || $1 ~ /^nvme/'
+}
+
+ask() {
+    local prompt="$1" default="${2:-}" reply
+    if [[ -n "$default" ]]; then
+        read -rp "$(echo -e "${BLU}?${RST} ${prompt} [${default}] ")" reply
+        echo "${reply:-$default}"
+    else
+        read -rp "$(echo -e "${BLU}?${RST} ${prompt} ")" reply
+        echo "$reply"
+    fi
+}
+
+confirm_wipe() {
+    local disk="$1"
+    echo
+    echo -e "${RED}╭─────────────────────────────────────────────────────────╮${RST}"
+    echo -e "${RED}│  About to ERASE every byte on /dev/${disk}              │${RST}"
+    echo -e "${RED}│  This cannot be undone.                                 │${RST}"
+    echo -e "${RED}╰─────────────────────────────────────────────────────────╯${RST}"
+    echo
+    local token
+    read -rp "$(echo -e "Type ${YEL}WIPE ${disk}${RST} to continue: ")" token
+    if [[ "$token" != "WIPE $disk" ]]; then
+        echo -e "${GRN}Cancelled. Nothing was written.${RST}"
+        exit 0
+    fi
+}
+
+partition() {
+    local disk="$1"
+    echo -e "${BLU}»${RST} Creating GPT layout on /dev/$disk"
+    sgdisk --zap-all "/dev/$disk" >/dev/null
+    sgdisk -n 1:0:+512M -t 1:ef00 -c 1:"WilOS ESP"  "/dev/$disk" >/dev/null
+    sgdisk -n 2:0:0     -t 2:8300 -c 2:"WilOS root" "/dev/$disk" >/dev/null
+    partprobe "/dev/$disk"
+    sleep 1
+}
+
+target_paths() {
+    local disk="$1"
+    if [[ "$disk" == nvme* || "$disk" == mmcblk* ]]; then
+        ESP="/dev/${disk}p1"
+        ROOT="/dev/${disk}p2"
+    else
+        ESP="/dev/${disk}1"
+        ROOT="/dev/${disk}2"
+    fi
+}
+
+format() {
+    echo -e "${BLU}»${RST} Formatting ESP ($ESP) as FAT32"
+    mkfs.fat -F32 -n WILOSESP "$ESP" >/dev/null
+    echo -e "${BLU}»${RST} Formatting root ($ROOT) as Btrfs"
+    mkfs.btrfs -f -L WILOS "$ROOT" >/dev/null
+}
+
+mount_target() {
+    mkdir -p /mnt
+    mount "$ROOT" /mnt
+    btrfs subvolume create /mnt/@        >/dev/null
+    btrfs subvolume create /mnt/@home    >/dev/null
+    btrfs subvolume create /mnt/@log     >/dev/null
+    btrfs subvolume create /mnt/@cache   >/dev/null
+    btrfs subvolume create /mnt/@snapshots >/dev/null
+    umount /mnt
+
+    mount -o noatime,compress=zstd,space_cache=v2,subvol=@ "$ROOT" /mnt
+    mkdir -p /mnt/{home,var/log,var/cache,.snapshots,boot}
+    mount -o noatime,compress=zstd,subvol=@home      "$ROOT" /mnt/home
+    mount -o noatime,compress=zstd,subvol=@log       "$ROOT" /mnt/var/log
+    mount -o noatime,compress=zstd,subvol=@cache     "$ROOT" /mnt/var/cache
+    mount -o noatime,compress=zstd,subvol=@snapshots "$ROOT" /mnt/.snapshots
+    mount "$ESP" /mnt/boot
+}
+
+pacstrap_base() {
+    echo -e "${BLU}»${RST} Installing base system (this takes a few minutes)"
+    local pkgs
+    mapfile -t pkgs < <(grep -vE '^\s*(#|$)' /etc/wilos/install-packages.list)
+    pacstrap -K /mnt "${pkgs[@]}"
+}
+
+configure() {
+    local hostname="$1" username="$2" password="$3" locale="$4" tz="$5"
+    genfstab -U /mnt >> /mnt/etc/fstab
+
+    arch-chroot /mnt /bin/bash <<EOF
+set -e
+ln -sf /usr/share/zoneinfo/${tz} /etc/localtime
+hwclock --systohc
+sed -i "s/^#${locale}/${locale}/" /etc/locale.gen
+locale-gen >/dev/null
+echo "LANG=${locale}" > /etc/locale.conf
+echo "${hostname}" > /etc/hostname
+cat > /etc/hosts <<HOSTS
+127.0.0.1   localhost
+::1         localhost
+127.0.1.1   ${hostname}.localdomain ${hostname}
+HOSTS
+
+useradd -m -G wheel,audio,video,storage,network -s /bin/zsh "${username}"
+echo "${username}:${password}" | chpasswd
+sed -i 's/^# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
+passwd -l root
+
+systemctl enable NetworkManager
+systemctl enable bluetooth
+systemctl enable greetd
+systemctl enable systemd-timesyncd
+
+bootctl install
+cat > /boot/loader/loader.conf <<LOADER
+default wilos
+timeout 3
+console-mode max
+editor no
+LOADER
+
+ROOT_UUID=\$(blkid -s UUID -o value ${ROOT})
+cat > /boot/loader/entries/wilos.conf <<ENTRY
+title    WilOS Aurora
+linux    /vmlinuz-linux
+initrd   /intel-ucode.img
+initrd   /amd-ucode.img
+initrd   /initramfs-linux.img
+options  root=UUID=\${ROOT_UUID} rootflags=subvol=@ rw quiet splash
+ENTRY
+EOF
+}
+
+main() {
+    require_root
+    banner
+
+    echo "Detected disks:"
+    list_disks
+    echo
+
+    local default_disk live
+    live="$(live_disk | sed 's|^/dev/||')"
+    default_disk="$(lsblk -dno NAME | grep -v "^$live$" | head -n1)"
+
+    DISK="$(ask "Target disk (will be ERASED)" "$default_disk")"
+    if [[ -z "$DISK" || ! -b "/dev/$DISK" ]]; then
+        echo -e "${RED}Not a block device: /dev/$DISK${RST}"; exit 1
+    fi
+    if [[ "$DISK" == "$live" ]]; then
+        echo -e "${RED}Refusing to install onto the live disk.${RST}"
+        exit 1
+    fi
+
+    HOSTNAME="$(ask 'Hostname'           'wilos')"
+    USERNAME="$(ask 'Primary user name'  'wil')"
+    while :; do
+        read -rsp "$(echo -e "${BLU}?${RST} Password for ${USERNAME}: ")" PASSWORD; echo
+        read -rsp "$(echo -e "${BLU}?${RST} Repeat:                 ")" PASSWORD2; echo
+        [[ "$PASSWORD" == "$PASSWORD2" && -n "$PASSWORD" ]] && break
+        echo -e "${YEL}Passwords don't match or are empty. Try again.${RST}"
+    done
+    LOCALE="$(ask 'Locale'   'en_US.UTF-8 UTF-8')"
+    TZ="$(ask     'Timezone' 'Europe/Paris')"
+
+    confirm_wipe "$DISK"
+
+    target_paths "$DISK"
+    partition "$DISK"
+    format
+    mount_target
+    pacstrap_base
+    configure "$HOSTNAME" "$USERNAME" "$PASSWORD" "$LOCALE" "$TZ"
+
+    sync
+    echo
+    echo -e "${GRN}WilOS installed.${RST} Reboot now? [Y/n]"
+    read -r r
+    if [[ ! "$r" =~ ^[Nn]$ ]]; then
+        umount -R /mnt
+        systemctl reboot
+    fi
+}
+
+main "$@"

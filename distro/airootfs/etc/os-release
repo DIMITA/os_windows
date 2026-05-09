@@ -1,0 +1,11 @@
+NAME="WilOS"
+PRETTY_NAME="WilOS Aurora"
+ID=wilos
+ID_LIKE=arch
+BUILD_ID=rolling
+ANSI_COLOR="38;2;124;200;255"
+HOME_URL="https://wilos.example/"
+DOCUMENTATION_URL="https://wilos.example/docs"
+SUPPORT_URL="https://wilos.example/support"
+BUG_REPORT_URL="https://wilos.example/bugs"
+LOGO=wilos

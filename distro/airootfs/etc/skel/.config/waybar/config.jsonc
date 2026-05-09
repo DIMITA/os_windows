@@ -1,0 +1,111 @@
+// WilOS Aurora — top menu bar (macOS-leaning).
+// Layout: app menu / current app + workspaces  •  clock  •  status icons.
+{
+    "layer": "top",
+    "position": "top",
+    "height": 30,
+    "margin-top": 6,
+    "margin-left": 12,
+    "margin-right": 12,
+    "spacing": 8,
+
+    "modules-left":   ["custom/logo", "hyprland/workspaces", "hyprland/window"],
+    "modules-center": ["clock"],
+    "modules-right":  ["tray", "network", "bluetooth", "pulseaudio", "backlight",
+                       "battery", "custom/power"],
+
+    "custom/logo": {
+        "format": " ",
+        "tooltip": false,
+        "on-click": "wofi --show drun"
+    },
+
+    "hyprland/workspaces": {
+        "format": "{icon}",
+        "format-icons": {
+            "1": "1",
+            "2": "2",
+            "3": "3",
+            "4": "4",
+            "5": "5",
+            "6": "6",
+            "7": "7",
+            "8": "8",
+            "9": "9",
+            "default": "•",
+            "active":  "●",
+            "urgent":  "!"
+        },
+        "on-click": "activate",
+        "sort-by-number": true
+    },
+
+    "hyprland/window": {
+        "format": "{}",
+        "max-length": 60,
+        "separate-outputs": true
+    },
+
+    "clock": {
+        "interval": 1,
+        "format": "{:%a %d %b   %H:%M}",
+        "tooltip-format": "<big>{:%Y %B}</big>\n<tt>{calendar}</tt>",
+        "calendar": {
+            "mode": "month",
+            "weeks-pos": "right",
+            "format": {
+                "today": "<span color='#7CC8FF'><b>{}</b></span>"
+            }
+        }
+    },
+
+    "tray": {
+        "spacing": 8,
+        "icon-size": 16
+    },
+
+    "network": {
+        "format-wifi": "  {essid}",
+        "format-ethernet": "  {ipaddr}",
+        "format-disconnected": "睊",
+        "tooltip-format": "{ifname}: {ipaddr}/{cidr}\n {bandwidthDownBytes} ↓  {bandwidthUpBytes} ↑",
+        "on-click": "nm-connection-editor"
+    },
+
+    "bluetooth": {
+        "format": "",
+        "format-disabled": "",
+        "format-connected": " {num_connections}",
+        "tooltip-format": "{controller_alias}\t{controller_address}\n\n{num_connections} connected",
+        "on-click": "blueman-manager"
+    },
+
+    "pulseaudio": {
+        "scroll-step": 5,
+        "format": "{icon} {volume}%",
+        "format-muted": "婢",
+        "format-icons": {
+            "default": ["", "", ""]
+        },
+        "on-click": "pavucontrol"
+    },
+
+    "backlight": {
+        "format": "{icon} {percent}%",
+        "format-icons": ["", "", "", "", "", "", "", "", ""]
+    },
+
+    "battery": {
+        "states": { "warning": 30, "critical": 15 },
+        "format": "{icon} {capacity}%",
+        "format-charging": " {capacity}%",
+        "format-plugged": " {capacity}%",
+        "format-icons": ["", "", "", "", ""]
+    },
+
+    "custom/power": {
+        "format": "",
+        "tooltip": false,
+        "on-click": "wlogout"
+    }
+}

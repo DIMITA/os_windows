@@ -69,18 +69,42 @@ shaders so they stay live (real-time blur, not pre-baked):
 - Two-tone outline, 1.5 px stroke, 24 × 24 grid.
 - Filled variant for selected/active state only.
 
-## Surfaces
+## Surfaces (macOS-leaning layout)
 
-- **Lock screen**: aurora material, time top-left, weather widget,
+- **Lock screen**: aurora material, large time and date centered,
   passwordless authentication chip.
-- **Desktop**: wallpaper + mica taskbar (centered, floating).
-- **Start**: glass panel, search bar at the top, pinned grid, "all
-  apps" drawer, recommended/AI strip at the bottom.
-- **Action centre**: glass column on the right, quick toggles, media,
-  notifications grouped by app, focus modes.
-- **Windows**: rounded glass chrome, traffic-light controls on the
-  right, snap layouts on hover of the maximise button.
-- **Settings**: two-pane glass layout, search-first.
+- **Top menu bar**: floating glass slab anchored top, 12 px from the
+  edges, 14 px rounded. Workspaces as dots (left), live clock
+  (centered), status icons (right), tucked-in app menu icon at the
+  far left.
+- **Bottom dock**: floating glass slab anchored bottom, centered,
+  22 px rounded. Pinned launchers + open-app icons. Hover-lift
+  animation (8 px translateY, 200 ms aurora spring).
+- **Spotlight launcher**: glass card centered on the screen,
+  16 px focus ring in `accent/aurora`, fuzzy search, instant results.
+- **Notifications**: glass cards top-right, stack vertically, slide
+  from the right with the standard spring.
+- **Windows**: 16 px rounded chrome, default opacity 0.92 active /
+  0.84 inactive so blur shows through. Window controls on the LEFT
+  (close / minimise / fullscreen, traffic-light style).
+- **Workspace overview**: 3-finger swipe up reveals all workspaces
+  as scaled-down glass tiles.
+
+## Mapping to the implementation
+
+The Aurora identity is realised by three configuration surfaces:
+
+| Token area     | Lives in                                                  |
+|----------------|-----------------------------------------------------------|
+| Window glass   | `hyprland.conf` `decoration { blur, rounding, shadow }`   |
+| Bar/dock glass | `waybar/style.css`, `waybar/dock.css`                     |
+| Launcher glass | `wofi/style.css`                                          |
+| Terminal       | `kitty/kitty.conf` colour palette                         |
+| Notifications  | `mako/config` colours + radius                            |
+
+The Hyprland `general.col.active_border` gradient
+(`#7CC8FF → #B198FF`) IS the Aurora accent and must match the
+gradient used in dock hover and launcher focus.
 
 A full Figma library will live in the (future) `design/` directory and
 will be wired to the compositor through generated tokens.

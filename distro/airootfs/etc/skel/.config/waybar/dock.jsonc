@@ -1,0 +1,43 @@
+// WilOS Aurora — bottom dock (macOS-leaning).
+// A second waybar instance, anchored bottom-center, holding launcher
+// shortcuts. The taskbar list keeps it dynamic for open apps.
+{
+    "layer": "top",
+    "position": "bottom",
+    "height": 56,
+    "margin-bottom": 12,
+    "spacing": 8,
+    "exclusive": false,
+    "passthrough": false,
+
+    "modules-left":   ["wlr/taskbar"],
+    "modules-center": [
+        "custom/finder", "custom/launcher", "custom/browser",
+        "custom/mail",   "custom/messages", "custom/music",
+        "custom/photos", "custom/settings", "custom/terminal", "custom/sep",
+        "custom/files",  "custom/trash"
+    ],
+    "modules-right":  [],
+
+    "wlr/taskbar": {
+        "format": "{icon}",
+        "icon-size": 32,
+        "tooltip-format": "{title}",
+        "on-click":  "activate",
+        "on-click-middle": "close",
+        "ignore-list": ["wofi", "waybar"]
+    },
+
+    "custom/finder":   { "format": "", "tooltip": "Files",     "on-click": "nautilus" },
+    "custom/launcher": { "format": "", "tooltip": "Launchpad", "on-click": "wofi --show drun" },
+    "custom/browser":  { "format": "", "tooltip": "Browser",   "on-click": "firefox" },
+    "custom/mail":     { "format": "", "tooltip": "Mail",      "on-click": "xdg-open mailto:" },
+    "custom/messages": { "format": "", "tooltip": "Messages",  "on-click": "true" },
+    "custom/music":    { "format": "", "tooltip": "Music",     "on-click": "mpv" },
+    "custom/photos":   { "format": "", "tooltip": "Photos",    "on-click": "loupe" },
+    "custom/settings": { "format": "", "tooltip": "Settings",  "on-click": "true" },
+    "custom/terminal": { "format": "", "tooltip": "Terminal",  "on-click": "kitty" },
+    "custom/sep":      { "format": "│", "tooltip": "" },
+    "custom/files":    { "format": "", "tooltip": "Downloads", "on-click": "nautilus ~/Downloads" },
+    "custom/trash":    { "format": "", "tooltip": "Trash",     "on-click": "nautilus trash:///" }
+}

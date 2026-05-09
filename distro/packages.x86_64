@@ -1,0 +1,133 @@
+# Base system
+base
+base-devel
+linux
+linux-firmware
+linux-headers
+intel-ucode
+amd-ucode
+sudo
+nano
+vim
+which
+bash-completion
+
+# Boot + installer
+grub
+efibootmgr
+arch-install-scripts
+mkinitcpio
+mkinitcpio-archiso
+syslinux
+isolinux
+edk2-shell
+memtest86+-efi
+
+# File systems & disks
+btrfs-progs
+dosfstools
+exfatprogs
+e2fsprogs
+ntfs-3g
+parted
+gptfdisk
+
+# Network
+networkmanager
+network-manager-applet
+nm-connection-editor
+iwd
+wpa_supplicant
+openssh
+curl
+wget
+
+# Audio
+pipewire
+pipewire-alsa
+pipewire-pulse
+pipewire-jack
+wireplumber
+pavucontrol
+playerctl
+
+# Bluetooth
+bluez
+bluez-utils
+blueman
+
+# Wayland + Hyprland (Aurora compositor)
+hyprland
+xdg-desktop-portal
+xdg-desktop-portal-hyprland
+xdg-desktop-portal-gtk
+xdg-utils
+qt5-wayland
+qt6-wayland
+polkit
+polkit-kde-agent
+qt6-svg
+qt6-declarative
+
+# Shell components — top bar, dock, launcher, notifications, wallpaper
+waybar
+wofi
+mako
+swww
+hyprpicker
+wl-clipboard
+cliphist
+grim
+slurp
+swappy
+brightnessctl
+
+# Login manager
+greetd
+greetd-tuigreet
+
+# File manager + viewer + utilities
+nautilus
+loupe
+gnome-text-editor
+gnome-calculator
+gnome-clocks
+file-roller
+mpv
+
+# Terminal
+kitty
+
+# Browser
+firefox
+
+# Fonts
+ttf-jetbrains-mono
+ttf-jetbrains-mono-nerd
+ttf-inter
+noto-fonts
+noto-fonts-cjk
+noto-fonts-emoji
+noto-fonts-extra
+ttf-font-awesome
+
+# Icons + themes
+papirus-icon-theme
+adwaita-icon-theme
+gnome-themes-extra
+
+# Misc utilities used by the live environment
+git
+htop
+fastfetch
+zsh
+zsh-completions
+unzip
+zip
+p7zip
+rsync
+tree
+jq
+lsof
+usbutils
+pciutils

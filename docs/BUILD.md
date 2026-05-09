@@ -1,58 +1,110 @@
-# Building WilOS
+# Building WilOS Aurora
 
-## Toolchain
+WilOS is built with `mkarchiso` from the `archiso` package. You need
+to build on an **Arch Linux host** (real machine or VM) — `mkarchiso`
+will not run correctly on other distributions.
 
-A dedicated `i686-elf` cross compiler is the recommended way to build
-WilOS. On Linux you can use a host toolchain with `gcc-multilib`
-installed, which is what the default `Makefile` falls back to.
-
-### Debian / Ubuntu
+## Host setup
 
 ```sh
-sudo apt-get install build-essential nasm gcc-multilib \
-                     grub-pc-bin grub-common xorriso \
-                     qemu-system-x86
+sudo pacman -Syu
+sudo pacman -S archiso imagemagick git
 ```
 
-### macOS (Homebrew)
+Optional (for testing the resulting ISO without writing it to a USB
+stick):
 
 ```sh
-brew install x86_64-elf-gcc nasm xorriso qemu i686-elf-gcc
+sudo pacman -S qemu-desktop edk2-ovmf
 ```
 
-If `i686-elf-gcc` is not in your `PATH`, override the prefix:
+## Build
 
 ```sh
-make CROSS=i686-elf-
+git clone <this repo> wilos
+cd wilos
+sudo ./scripts/build-iso.sh
 ```
 
-## Targets
+`mkarchiso` will:
+1. Create a temporary work directory under `out/work/`
+2. Bootstrap a base system per `distro/packages.x86_64`
+3. Overlay everything in `distro/airootfs/` on top of it
+4. Build the squashfs image
+5. Wrap it in an ISO with the BIOS + UEFI boot configurations from
+   `distro/syslinux/`, `distro/efiboot/`, `distro/grub/`
 
-| Command           | Result                                              |
-|-------------------|-----------------------------------------------------|
-| `make`            | builds `build/wilos.elf` (multiboot kernel)         |
-| `make iso`        | packages `wilos.iso` via `grub-mkrescue`            |
-| `make run`        | boots the ISO in QEMU with serial-on-stdio          |
-| `make run-kernel` | boots the kernel directly with `qemu -kernel`       |
-| `make clean`      | wipes `build/` and `wilos.iso`                      |
+The resulting ISO is dropped in `out/wilos-YYYY.MM.DD-x86_64.iso`.
 
-## Verifying a build
+A full first build downloads ~1.5 GiB of packages and produces a
+~2.5 GiB ISO. Subsequent builds reuse the pacman cache and are much
+faster.
+
+## Test in QEMU
+
+UEFI:
 
 ```sh
-grub-file --is-x86-multiboot build/wilos.elf && echo OK
+qemu-system-x86_64 -enable-kvm -m 4G -smp 4 \
+    -drive if=pflash,format=raw,readonly=on,file=/usr/share/edk2/x64/OVMF_CODE.4m.fd \
+    -drive if=pflash,format=raw,file=/var/lib/wilos/OVMF_VARS.4m.fd \
+    -cdrom out/wilos-*.iso \
+    -boot d
 ```
 
-A correctly built kernel will print `OK`. Booting it should land on
-the WilOS banner and the kernel shell prompt.
-
-## Running on real hardware
-
-`wilos.iso` is bootable on any BIOS/UEFI x86 machine that supports
-GRUB legacy boot. Burn it to a USB stick:
+BIOS:
 
 ```sh
-sudo dd if=wilos.iso of=/dev/sdX bs=4M status=progress conv=fsync
+qemu-system-x86_64 -enable-kvm -m 4G -smp 4 \
+    -cdrom out/wilos-*.iso -boot d
 ```
 
-There are no graphics or USB drivers yet, so you will need a serial
-console or an old PS/2 keyboard to interact.
+## Flash to USB
+
+```sh
+sudo ./scripts/flash-usb.sh out/wilos-*.iso /dev/sdX
+```
+
+The helper refuses to write to anything that looks like an internal
+disk and requires you to type `FLASH sdX` to proceed. If you really
+want to flash an internal disk (rare), use `dd` directly.
+
+## Customisation
+
+Most changes happen by editing files under
+`distro/airootfs/etc/skel/.config/`. The whole directory is mirrored
+into both the live session and the installed system, so edits are
+applied uniformly.
+
+### Adding a package
+
+- For the **live ISO** (available the moment you boot the USB):
+  add to `distro/packages.x86_64`.
+- For the **installed system** (pacstrapped by `wilos-install`):
+  add to `distro/airootfs/etc/wilos/install-packages.list`.
+- For both: add to both files.
+
+### Changing the wallpaper
+
+Either:
+- Drop your own `aurora.jpg` into
+  `distro/airootfs/usr/share/backgrounds/wilos/`
+- Or edit `scripts/make-wallpaper.sh` and rerun it.
+
+Then change the path in the `swww img …` line of
+`distro/airootfs/etc/skel/.config/hypr/hyprland.conf` if you renamed
+the file.
+
+### Tuning the look
+
+The Aurora glassmorphism is driven by three places:
+
+1. `hyprland.conf` `decoration { … }` — blur radius + passes,
+   rounding, shadow, opacities.
+2. `waybar/style.css` and `waybar/dock.css` — top bar and dock glass
+   tints, accent gradients.
+3. `wofi/style.css` — launcher glass card.
+
+The colour palette and motion curves are documented in
+[`docs/DESIGN.md`](DESIGN.md). Keep these three files in sync with
+the design tokens — that's how the system stays visually coherent.

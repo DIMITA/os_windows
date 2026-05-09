@@ -1,0 +1,60 @@
+/* WilOS Aurora — bottom dock style.
+   Floating, centered, glass with a soft inner highlight on top. */
+
+* {
+    font-family: "JetBrainsMono Nerd Font", "Font Awesome 6 Free";
+    font-size: 22px;
+    border: none;
+    border-radius: 0;
+    min-height: 0;
+}
+
+window#waybar {
+    background: rgba(20, 20, 30, 0.55);
+    color: #ECEEF6;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.10);
+    box-shadow:
+        0 12px 40px rgba(0, 0, 0, 0.45),
+        inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    padding: 0 14px;
+}
+
+#taskbar button,
+#custom-finder, #custom-launcher, #custom-browser, #custom-mail,
+#custom-messages, #custom-music, #custom-photos, #custom-settings,
+#custom-terminal, #custom-files, #custom-trash {
+    color: #ECEEF6;
+    padding: 0 10px;
+    margin: 4px 2px;
+    border-radius: 14px;
+    transition: all 200ms cubic-bezier(0.16, 1.0, 0.3, 1.0);
+}
+
+#taskbar button:hover,
+#custom-finder:hover, #custom-launcher:hover, #custom-browser:hover,
+#custom-mail:hover, #custom-messages:hover, #custom-music:hover,
+#custom-photos:hover, #custom-settings:hover, #custom-terminal:hover,
+#custom-files:hover, #custom-trash:hover {
+    background: rgba(255, 255, 255, 0.10);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.06);
+    /* gentle lift to mimic dock magnification */
+    margin-top: 0;
+    margin-bottom: 8px;
+}
+
+#custom-launcher { color: #B198FF; }
+#custom-browser  { color: #7CC8FF; }
+#custom-mail     { color: #9BE3C0; }
+#custom-music    { color: #F4B0E5; }
+#custom-photos   { color: #FFD580; }
+#custom-trash    { color: rgba(255, 138, 138, 0.85); }
+
+#custom-sep {
+    color: rgba(255, 255, 255, 0.18);
+    padding: 0 6px;
+}
+
+#taskbar button.active {
+    background: rgba(124, 200, 255, 0.18);
+}

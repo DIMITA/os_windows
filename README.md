@@ -1,69 +1,116 @@
-# WilOS
+# WilOS Aurora
 
-WilOS is a from-scratch operating system written in C and assembly.
-The long-term goal is feature parity with Microsoft Windows (and its
-announced future evolutions) under a fresh brand and a modern
-glassmorphism / acrylic visual identity.
+WilOS is a desktop operating system built on the Linux kernel, an
+Arch base, and a custom **Aurora** shell — glassmorphic, animated,
+GPU-blurred, with macOS-leaning ergonomics (top menu bar, centered
+floating dock, Spotlight launcher, trackpad gestures) and the breadth
+of the Linux ecosystem underneath.
 
-This repository contains the **kernel + storage stack** (phases 0 and
-1.0). It boots on i686 hardware and inside QEMU through GRUB
-(multiboot 1), brings up the CPU, memory management, interrupts,
-basic drivers, an ATA disk driver, MBR/GPT partition parsing, FAT16
-/ FAT32 read-only, and an in-kernel debug shell that can list disks
-and browse FAT volumes. It is the substrate on which every later
-phase (write support, installer, userland, GUI compositor,
-application suite) is built.
+This repository contains the **distribution sources**: the archiso
+profile, the shell configuration tree (Hyprland, Waybar, wofi, mako,
+Kitty), the installer, the wallpaper generator, and the helper
+scripts that turn it all into a bootable, installable ISO.
+
+## What ships
+
+- **Linux kernel** (latest stable) with full hardware support: AHCI,
+  NVMe, USB, Wi-Fi, Bluetooth, GPU drivers, audio.
+- **Aurora compositor**: Hyprland with vibrant blur, 16 px rounded
+  corners, ambient shadows, spring-curve animations, gesture-driven
+  workspace switching, tearing-free.
+- **macOS-leaning shell**:
+  - **Top bar** (Waybar) — app menu trigger, workspace dots, current
+    window title, centered live clock, status icons (network, BT,
+    sound, brightness, battery, power).
+  - **Bottom dock** (Waybar instance) — floating glass slab,
+    centered, hover-lift animation, launcher icons + open-app
+    taskbar.
+  - **Spotlight launcher** (wofi) — Super+Space, fuzzy search of
+    apps and files.
+  - **Notifications** (mako) — top-right glass cards.
+- **Apps**: Files (Nautilus), Terminal (Kitty themed), Browser
+  (Firefox), Mail/Calendar/Music/Photos/Calculator, Settings panel.
+- **Login**: greetd + tuigreet, "Welcome to WilOS — Light, made
+  personal."
+- **Installer** (`wilos-install`): guided text installer. Refuses to
+  touch the live disk. Requires the user to type
+  `WIPE <disk>` exactly before any write.
+- **Btrfs root** with `@ / @home / @log / @cache / @snapshots`
+  subvolumes ready for snapper-style snapshots later.
 
 ## Quick start
 
-Requirements on the build host:
-
-- `i686-elf-gcc` / `i686-elf-ld` cross compiler (or a host toolchain
-  capable of producing 32-bit freestanding ELF — see `docs/BUILD.md`)
-- `nasm`
-- `grub-mkrescue` and `xorriso` (for the bootable ISO)
-- `qemu-system-i386` (to run)
+### Build the ISO (on an Arch host)
 
 ```sh
-make            # build kernel/wilos.elf
-make iso        # build wilos.iso
-make run        # boot the ISO in QEMU
+sudo pacman -S archiso imagemagick
+sudo ./scripts/build-iso.sh
+# → ISO appears in ./out/wilos-YYYY.MM.DD-x86_64.iso
 ```
 
-On boot you land in the WilOS kernel shell. Type `help` to list the
-built-in commands.
+### Flash to a USB stick
+
+```sh
+sudo ./scripts/flash-usb.sh out/wilos-*.iso /dev/sdX
+```
+
+The script refuses anything that looks like an internal disk
+(`sda`, `nvme0n1`, `mmcblk0`) and asks for `FLASH sdX` to be typed.
+
+### Install onto a machine
+
+Boot the USB. Open a terminal (Super + Return). Run:
+
+```sh
+sudo wilos-install
+```
+
+You will be asked for a target disk, hostname, user, password,
+locale, timezone, then to type `WIPE <disk>` to authorise the wipe.
 
 ## Repository layout
 
 ```
-boot/              multiboot header + early entry (asm)
-kernel/
-  arch/i386/       CPU bring-up: GDT, IDT, ISR stubs, paging, ports
-  drivers/         VGA text, serial (COM1), PS/2 keyboard, PIT, ATA PIO
-  fs/              MBR/GPT partition tables, FAT16/FAT32 read-only
-  mm/              physical memory manager, kernel heap
-  lib/             freestanding libc subset (string, printf, panic)
-  shell/           in-kernel debug shell
-  include/wilos/   public kernel headers
-  kernel.c         kmain entry point
-  linker.ld        kernel link script
-grub/              grub.cfg used when packaging the ISO
-docs/              architecture, roadmap, design system, build notes
-scripts/           helper scripts (ISO packaging, run helpers)
+distro/
+  profiledef.sh                archiso profile metadata
+  packages.x86_64              packages installed in the ISO
+  pacman.conf                  build-time pacman config
+  syslinux/                    BIOS boot menu
+  efiboot/                     systemd-boot menu (UEFI)
+  grub/                        GRUB menu
+  airootfs/                    overlay rooted at / in the live system
+    etc/
+      greetd/config.toml         autologin into Hyprland
+      os-release / hostname / motd
+      skel/.config/              user defaults
+        hypr/hyprland.conf       Aurora compositor config
+        waybar/{config,style,dock} top bar + bottom dock
+        wofi/{config,style.css}  Spotlight launcher
+        kitty/kitty.conf         terminal theme
+        mako/config              notifications theme
+      wilos/install-packages.list packages pacstrap installs
+    usr/
+      local/bin/
+        wilos-install            installer (typed-confirmation gate)
+        wilos-firstrun           first login welcome
+      share/backgrounds/wilos/   wallpaper(s)
+
+scripts/
+  build-iso.sh        sudo wrapper around mkarchiso
+  flash-usb.sh        guarded dd-to-USB helper
+  make-wallpaper.sh   generates the Aurora wallpaper
+
+docs/
+  ARCHITECTURE.md     where each component lives, how it fits
+  DESIGN.md           the Aurora visual identity (tokens, motion…)
+  ROADMAP.md          phased plan of features and apps
+  BUILD.md            full build and customisation guide
 ```
-
-## Status
-
-Phase 0 — kernel foundation — is what ships in this commit. Everything
-beyond (VFS, FAT/NTFS-like FS, ELF userland loader, syscalls,
-networking stack, compositor, glassmorphism shell, application suite,
-package manager, AI integration) is described in
-[`docs/ROADMAP.md`](docs/ROADMAP.md). The visual identity that the
-future GUI will implement is captured in
-[`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## License
 
-Original code in this repository is released under the MIT license.
-WilOS is an independent project and is **not** affiliated with, endorsed
-by, or derived from Microsoft Windows.
+Original code, configurations, and assets in this repository are
+released under the MIT license (see `LICENSE`). All Arch Linux
+packages keep their respective upstream licenses. WilOS is an
+independent project and is **not** affiliated with Arch Linux,
+Apple, or Microsoft.

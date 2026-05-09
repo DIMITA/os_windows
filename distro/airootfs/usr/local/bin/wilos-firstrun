@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# wilos-firstrun — runs once on the first interactive login of the
+# live session. Currently just shows the welcome notification once
+# the user has reached the desktop.
+set -eu
+
+mark="$HOME/.config/wilos-firstrun-done"
+[[ -f "$mark" ]] && exit 0
+
+# Wait for the notification daemon to be alive.
+for _ in $(seq 1 20); do
+    if pgrep -x mako >/dev/null; then break; fi
+    sleep 0.5
+done
+
+notify-send -i wilos -u normal "Welcome to WilOS Aurora" \
+    "Press Super + Space to launch apps. Press Super + Return for a terminal. Run 'wilos-install' from a terminal to install WilOS to disk."
+
+mkdir -p "$(dirname "$mark")"
+touch "$mark"
