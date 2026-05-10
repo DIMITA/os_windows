@@ -18,12 +18,20 @@
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use wilai_core::{Category, Risk};
+use wilai_core::{Category, Mode, Risk};
 use wilai_tools::spec::{
     AuditSpec, BuiltinSpec, CaptureKind, ExecutorSpec, InputSpec, InputType, OutputSpec, ToolSpec,
 };
 
 pub fn descriptor_to_spec(server_name: &str, desc: &crate::wire::McpToolDescriptor) -> Result<ToolSpec> {
+    descriptor_to_spec_with_gate(server_name, desc, false)
+}
+
+pub fn descriptor_to_spec_with_gate(
+    server_name: &str,
+    desc: &crate::wire::McpToolDescriptor,
+    gate_in_pentest: bool,
+) -> Result<ToolSpec> {
     let name = format!("mcp.{}.{}", server_name, desc.name);
     let (category, risk) = classify(&desc.name);
     let inputs = parse_inputs(desc.input_schema.as_ref());
@@ -39,7 +47,10 @@ pub fn descriptor_to_spec(server_name: &str, desc: &crate::wire::McpToolDescript
         risk,
         tags: vec!["mcp".to_string(), server_name.to_string()],
         mode_required: None,
-        mode_forbidden: None,
+        // gate_in_pentest=true marks the tool unavailable in pentest mode;
+        // the existing guard engine refuses it with reason "tool forbidden
+        // in mode=pentest" before any RPC leaves the daemon.
+        mode_forbidden: if gate_in_pentest { Some(Mode::Pentest) } else { None },
         inputs,
         guards: Vec::new(),
         executor: ExecutorSpec::Builtin(BuiltinSpec {
@@ -163,6 +174,34 @@ mod tests {
         };
         let spec = descriptor_to_spec("github", &d).unwrap();
         assert_eq!(spec.risk, Risk::Medium);
+    }
+
+    #[test]
+    fn gate_in_pentest_sets_mode_forbidden() {
+        let d = crate::wire::McpToolDescriptor {
+            name: "search_repositories".into(),
+            description: None,
+            input_schema: None,
+        };
+        let ungated = descriptor_to_spec_with_gate("github", &d, false).unwrap();
+        assert!(ungated.mode_forbidden.is_none());
+        let gated = descriptor_to_spec_with_gate("github", &d, true).unwrap();
+        assert_eq!(gated.mode_forbidden, Some(Mode::Pentest));
+
+        // The existing guard engine refuses gated tools in pentest mode
+        // before the call leaves the daemon.
+        use wilai_tools::guards::{evaluate, GuardOutcome};
+        let outcome = evaluate(&gated, &serde_json::json!({}), Mode::Pentest).unwrap();
+        match outcome {
+            GuardOutcome::Deny { reason, guard } => {
+                assert!(reason.contains("forbidden"));
+                assert_eq!(guard, "mode_forbidden");
+            }
+            other => panic!("expected Deny, got {other:?}"),
+        }
+        // And remains usable in normal mode.
+        let outcome = evaluate(&gated, &serde_json::json!({}), Mode::Normal).unwrap();
+        assert!(matches!(outcome, GuardOutcome::Allow));
     }
 
     #[test]

@@ -4,6 +4,7 @@ mod chat_socket;
 mod mode_cmd;
 mod schema;
 mod tool_authoring;
+mod tool_cmd;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -103,8 +104,15 @@ enum AuditCmd {
 
 #[derive(Subcommand)]
 enum ToolCmd {
-    /// List loaded tools.
-    List,
+    /// List loaded tools. By default reads from disk only; pass --daemon
+    /// to consult the running daemon's live registry (which includes any
+    /// MCP-contributed tools).
+    List {
+        #[arg(long)]
+        daemon: bool,
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+    },
     /// Scaffold a new tool YAML at the given path.
     New {
         /// Dotted name of the tool (e.g. "fs.snapshot").
@@ -161,7 +169,17 @@ async fn main() -> Result<()> {
             AuditCmd::Keygen { out } => audit_cmd::keygen(out.as_deref()),
         },
         Cmd::Tool { sub } => match sub {
-            ToolCmd::List => list_tools(),
+            ToolCmd::List { daemon, socket } => {
+                if daemon || socket.is_some() {
+                    let path = match socket {
+                        Some(p) => p,
+                        None => wilai_daemon::service::default_socket_path()?,
+                    };
+                    tool_cmd::list_via_daemon(&path).await
+                } else {
+                    list_tools()
+                }
+            }
             ToolCmd::New { name, out, category, risk } => {
                 tool_authoring::new(&name, out.as_deref(), &category, &risk)
             }

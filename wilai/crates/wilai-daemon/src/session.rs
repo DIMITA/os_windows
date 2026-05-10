@@ -132,6 +132,25 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                     })
                     .await;
             }
+            ClientOp::ToolsList => {
+                let tools: Vec<crate::protocol::ToolSummary> = service
+                    .registry
+                    .iter()
+                    .map(|(name, spec)| crate::protocol::ToolSummary {
+                        name: name.to_string(),
+                        version: spec.version,
+                        category: spec.category.to_string(),
+                        risk: spec.risk.to_string(),
+                        description: spec.description.clone(),
+                        origin: if name.starts_with("mcp.") {
+                            "mcp".to_string()
+                        } else {
+                            "yaml".to_string()
+                        },
+                    })
+                    .collect();
+                let _ = event_tx.send(ServerEvent::Tools { tools }).await;
+            }
             ClientOp::ModeSet { to, trigger } => {
                 let target: Mode = match to.parse() {
                     Ok(m) => m,

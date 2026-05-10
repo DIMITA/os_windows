@@ -81,7 +81,11 @@ pub async fn init_mcp(
                 Ok(tools) => {
                     let mut count = 0;
                     for desc in &tools {
-                        match wilai_mcp::convert::descriptor_to_spec(name, desc) {
+                        match wilai_mcp::convert::descriptor_to_spec_with_gate(
+                            name,
+                            desc,
+                            server_cfg.gate_in_pentest,
+                        ) {
                             Ok(spec) => {
                                 registry.insert_dynamic(spec);
                                 count += 1;
@@ -95,7 +99,12 @@ pub async fn init_mcp(
                             }
                         }
                     }
-                    tracing::info!(server = %name, tools = count, "mcp server ready");
+                    tracing::info!(
+                        server = %name,
+                        tools = count,
+                        gated = server_cfg.gate_in_pentest,
+                        "mcp server ready"
+                    );
                     out.insert(name.clone(), client);
                 }
                 Err(e) => {

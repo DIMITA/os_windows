@@ -20,6 +20,9 @@ pub enum ClientOp {
     /// Switch the daemon's mode. Replies with `Mode` on success or `Error`
     /// (e.g. when leaving pentest while a pentest tool is in flight).
     ModeSet { to: String, trigger: Option<String> },
+    /// Ask the daemon for the current registry snapshot. Includes both
+    /// YAML-loaded and dynamically-registered (e.g. MCP) tools.
+    ToolsList,
     /// Close the session cleanly.
     Quit,
 }
@@ -65,6 +68,20 @@ pub enum ServerEvent {
         current: String,
         pentest_in_flight: u32,
     },
+    /// Snapshot of the live tool registry (response to `ToolsList`).
+    Tools { tools: Vec<ToolSummary> },
     /// Final event before the connection closes.
     Bye,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolSummary {
+    pub name: String,
+    pub version: u32,
+    pub category: String,
+    pub risk: String,
+    pub description: String,
+    /// "yaml" for tools loaded from disk, "mcp" for MCP-contributed,
+    /// "builtin" for in-process. Used by clients to render origin badges.
+    pub origin: String,
 }

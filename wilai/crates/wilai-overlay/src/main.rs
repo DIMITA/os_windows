@@ -148,6 +148,7 @@ async fn drive_session(cli: &Cli, socket: &Path, prompt: &str) -> Result<()> {
                 let urgency = if current == "pentest" { "critical" } else { "low" };
                 notify(cli, "Wilai mode", &current, urgency).await;
             }
+            ServerEvent::Tools { .. } => {}
         }
     }
 
