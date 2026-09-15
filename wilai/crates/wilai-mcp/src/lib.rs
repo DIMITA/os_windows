@@ -5,7 +5,9 @@
 
 pub mod client;
 pub mod convert;
+pub mod supervisor;
 pub mod wire;
 
 pub use client::{McpClient, McpToolHandle};
+pub use supervisor::{McpSupervisor, SupervisorStatus};
 pub use wire::{McpToolDescriptor, ToolContent};

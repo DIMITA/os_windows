@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tokio::time::timeout;
 
 const RPC_TIMEOUT: Duration = Duration::from_secs(60);
@@ -34,7 +34,8 @@ pub struct McpClient {
     next_id: Mutex<u64>,
     stdin: Mutex<ChildStdin>,
     pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Value>>>>,
-    _child: Mutex<Child>,
+    child: Mutex<Child>,
+    closed: Arc<Notify>,
     _reader_task: tokio::task::JoinHandle<()>,
 }
 
@@ -64,6 +65,8 @@ impl McpClient {
         let pending: Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<Value>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let pending_for_reader = pending.clone();
+        let closed = Arc::new(Notify::new());
+        let closed_for_reader = closed.clone();
         let server_name_for_reader = name.to_string();
         let reader_task = tokio::spawn(async move {
             let mut reader = BufReader::new(stdout).lines();
@@ -87,11 +90,15 @@ impl McpClient {
                         tracing::debug!(server = %server_name_for_reader, "no pending for id {id}");
                     }
                 } else {
-                    // notification or malformed; ignore for now.
                     tracing::debug!(server = %server_name_for_reader, "mcp notification: {trimmed}");
                 }
             }
             tracing::info!(server = %server_name_for_reader, "mcp reader closed");
+            // Fail any in-flight requests so callers unblock immediately
+            // instead of waiting for RPC_TIMEOUT.
+            let mut map = pending_for_reader.lock().await;
+            map.clear();
+            closed_for_reader.notify_waiters();
         });
 
         if let Some(stderr) = stderr {
@@ -109,12 +116,27 @@ impl McpClient {
             next_id: Mutex::new(1),
             stdin: Mutex::new(stdin),
             pending,
-            _child: Mutex::new(child),
+            child: Mutex::new(child),
+            closed,
             _reader_task: reader_task,
         });
 
         client.initialize().await?;
         Ok(client)
+    }
+
+    /// Resolves as soon as the child process's stdout closes (typically
+    /// because the child exited). Used by the supervisor to trigger restart.
+    pub async fn wait_closed(&self) {
+        self.closed.notified().await;
+    }
+
+    /// Kill the child. The reader task will notice the stdout close and
+    /// trigger `wait_closed`. Best-effort: if the child is already gone
+    /// the error is swallowed.
+    pub async fn kill(&self) {
+        let mut child = self.child.lock().await;
+        let _ = child.start_kill();
     }
 
     async fn initialize(&self) -> Result<()> {

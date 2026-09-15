@@ -1,6 +1,7 @@
 mod audit_cmd;
 mod chat;
 mod chat_socket;
+mod mcp_cmd;
 mod mode_cmd;
 mod schema;
 mod tool_authoring;
@@ -54,6 +55,28 @@ enum Cmd {
     Mode {
         #[command(subcommand)]
         sub: ModeCmd,
+    },
+    /// MCP server inspection and control (talks to wilai-daemon).
+    Mcp {
+        #[command(subcommand)]
+        sub: McpSub,
+    },
+}
+
+#[derive(Subcommand)]
+enum McpSub {
+    /// Print live MCP server status.
+    List {
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Trigger an immediate restart of the named server.
+    Restart {
+        server: String,
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
     },
 }
 
@@ -200,6 +223,22 @@ async fn main() -> Result<()> {
                     None => wilai_daemon::service::default_socket_path()?,
                 };
                 mode_cmd::set(&path, &mode, trigger.as_deref()).await
+            }
+        },
+        Cmd::Mcp { sub } => match sub {
+            McpSub::List { socket, json } => {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                mcp_cmd::list(&path, json).await
+            }
+            McpSub::Restart { server, socket } => {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                mcp_cmd::restart(&path, &server).await
             }
         },
     }

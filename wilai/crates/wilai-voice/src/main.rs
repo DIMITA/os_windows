@@ -301,6 +301,7 @@ async fn run_daemon_turn(socket: &Path, prompt: &str) -> Result<Vec<String>> {
                 eprintln!("[voice] mode is now {current}");
             }
             ServerEvent::Tools { .. } => {}
+            ServerEvent::McpServers { .. } => {}
         }
     }
 

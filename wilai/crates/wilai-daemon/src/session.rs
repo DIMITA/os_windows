@@ -151,6 +151,27 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                     .collect();
                 let _ = event_tx.send(ServerEvent::Tools { tools }).await;
             }
+            ClientOp::McpList => {
+                let servers = build_mcp_snapshot(&service).await;
+                let _ = event_tx.send(ServerEvent::McpServers { servers }).await;
+            }
+            ClientOp::McpRestart { server } => {
+                match service.mcp.get(&server) {
+                    Some(sup) => {
+                        sup.restart_now();
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        let servers = build_mcp_snapshot(&service).await;
+                        let _ = event_tx.send(ServerEvent::McpServers { servers }).await;
+                    }
+                    None => {
+                        let _ = event_tx
+                            .send(ServerEvent::Error {
+                                message: format!("mcp server `{server}` not configured"),
+                            })
+                            .await;
+                    }
+                }
+            }
             ClientOp::ModeSet { to, trigger } => {
                 let target: Mode = match to.parse() {
                     Ok(m) => m,
@@ -595,6 +616,30 @@ fn parse_mcp_name(name: &str) -> Option<(&str, &str)> {
     Some((&rest[..dot], &rest[dot + 1..]))
 }
 
+async fn build_mcp_snapshot(service: &Service) -> Vec<crate::protocol::McpServerInfo> {
+    let mut out = Vec::with_capacity(service.mcp.len());
+    for (name, sup) in &service.mcp {
+        let status = sup.status().await;
+        let gated = service
+            .cfg
+            .mcp
+            .get(name)
+            .map(|c| c.gate_in_pentest)
+            .unwrap_or(false);
+        out.push(crate::protocol::McpServerInfo {
+            name: status.name,
+            alive: status.alive,
+            uptime_s: status.uptime_s,
+            restart_count: status.restart_count,
+            tool_count: status.tool_count,
+            last_error: status.last_error,
+            gated_in_pentest: gated,
+        });
+    }
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
 async fn run_mcp_tool(
     service: &Service,
     server: &str,
@@ -602,12 +647,12 @@ async fn run_mcp_tool(
     args: &Value,
 ) -> Result<wilai_tools::ExecResult> {
     use std::time::Instant;
-    let client = service
+    let sup = service
         .mcp
         .get(server)
         .ok_or_else(|| anyhow!("mcp server `{server}` not registered"))?;
     let start = Instant::now();
-    let res = client.call_tool(tool, args.clone()).await?;
+    let res = sup.call_tool(tool, args.clone()).await?;
     let duration_ms = start.elapsed().as_millis() as u64;
     let mut text = String::new();
     for block in &res.content {
@@ -618,7 +663,7 @@ async fn run_mcp_tool(
     }
     let exit_code = if res.is_error { 1 } else { 0 };
     let total = text.len();
-    let truncated = false; // mcp content already serialized; left as-is
+    let truncated = false;
     Ok(wilai_tools::ExecResult {
         exit_code,
         output: text,

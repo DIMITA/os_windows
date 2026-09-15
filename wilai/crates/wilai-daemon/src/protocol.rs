@@ -23,6 +23,12 @@ pub enum ClientOp {
     /// Ask the daemon for the current registry snapshot. Includes both
     /// YAML-loaded and dynamically-registered (e.g. MCP) tools.
     ToolsList,
+    /// Ask the daemon for MCP supervisor status (one row per configured
+    /// server). Replies with `McpServers`.
+    McpList,
+    /// Trigger an immediate restart of the named MCP server. Replies
+    /// with `McpServers` (updated snapshot).
+    McpRestart { server: String },
     /// Close the session cleanly.
     Quit,
 }
@@ -70,8 +76,21 @@ pub enum ServerEvent {
     },
     /// Snapshot of the live tool registry (response to `ToolsList`).
     Tools { tools: Vec<ToolSummary> },
+    /// Snapshot of MCP supervisor state (response to `McpList` / `McpRestart`).
+    McpServers { servers: Vec<McpServerInfo> },
     /// Final event before the connection closes.
     Bye,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpServerInfo {
+    pub name: String,
+    pub alive: bool,
+    pub uptime_s: Option<u64>,
+    pub restart_count: u32,
+    pub tool_count: usize,
+    pub last_error: Option<String>,
+    pub gated_in_pentest: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -8,7 +8,7 @@ use tokio::sync::mpsc;
 use wilai_audit::writer::WriteRequest;
 use wilai_audit::AuditWriter;
 use wilai_core::{Config, Mode};
-use wilai_mcp::McpClient;
+use wilai_mcp::McpSupervisor;
 use wilai_providers::{AnthropicProvider, OllamaProvider, Provider};
 use wilai_tools::Registry;
 
@@ -20,9 +20,10 @@ pub struct Service {
     pub default_provider: String,
     pub default_model: String,
     pub confirm_timeout_s: u32,
-    /// Map from server name to live MCP client. Tools registered as
-    /// `mcp.<server>.<tool>` route here.
-    pub mcp: HashMap<String, Arc<McpClient>>,
+    /// Map from server name to its supervisor. The supervisor keeps the
+    /// underlying MCP client alive across crashes with exponential
+    /// backoff.
+    pub mcp: HashMap<String, Arc<McpSupervisor>>,
 }
 
 impl Service {
@@ -62,59 +63,61 @@ impl Service {
     }
 }
 
-/// Spawn each enabled MCP server, list its tools, and merge them into the
-/// registry under the prefix `mcp.<server>.<tool>`. Returns a map of live
-/// clients that the agent loop can route calls to. A failure to spawn one
-/// server is logged but does not abort daemon startup; the rest still come up.
+/// Spawn a supervisor per configured MCP server. Each supervisor keeps
+/// its underlying client alive with backoff. We block briefly on the
+/// initial tool listing so the registry is populated before the daemon
+/// starts accepting client connections; if the wait times out we install
+/// the supervisor anyway and the tools will appear after the next
+/// successful restart cycle.
 pub async fn init_mcp(
     cfg: &Config,
     registry: &mut Registry,
-) -> HashMap<String, Arc<McpClient>> {
-    let mut out: HashMap<String, Arc<McpClient>> = HashMap::new();
+) -> HashMap<String, Arc<McpSupervisor>> {
+    use std::time::Duration;
+    let mut out: HashMap<String, Arc<McpSupervisor>> = HashMap::new();
     for (name, server_cfg) in &cfg.mcp {
         if !server_cfg.enabled {
             tracing::info!(server = %name, "mcp server disabled in config; skipping");
             continue;
         }
-        match McpClient::spawn(name, &server_cfg.command, &server_cfg.args, &server_cfg.env).await {
-            Ok(client) => match client.list_tools().await {
-                Ok(tools) => {
-                    let mut count = 0;
-                    for desc in &tools {
-                        match wilai_mcp::convert::descriptor_to_spec_with_gate(
-                            name,
-                            desc,
-                            server_cfg.gate_in_pentest,
-                        ) {
-                            Ok(spec) => {
-                                registry.insert_dynamic(spec);
-                                count += 1;
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    server = %name,
-                                    tool = %desc.name,
-                                    "skip mcp tool: {e:#}"
-                                );
-                            }
+        let sup = McpSupervisor::spawn(name, &server_cfg.command, &server_cfg.args, &server_cfg.env).await;
+
+        // Wait up to 5s for the initial spawn to complete and tools to
+        // be listed. If it takes longer, register with 0 tools and let
+        // the supervisor loop backfill.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let tools = sup.tools().await;
+            if !tools.is_empty() {
+                let mut count = 0;
+                for desc in &tools {
+                    match wilai_mcp::convert::descriptor_to_spec_with_gate(
+                        name,
+                        desc,
+                        server_cfg.gate_in_pentest,
+                    ) {
+                        Ok(spec) => {
+                            registry.insert_dynamic(spec);
+                            count += 1;
                         }
+                        Err(e) => tracing::warn!(server = %name, tool = %desc.name, "skip mcp tool: {e:#}"),
                     }
-                    tracing::info!(
-                        server = %name,
-                        tools = count,
-                        gated = server_cfg.gate_in_pentest,
-                        "mcp server ready"
-                    );
-                    out.insert(name.clone(), client);
                 }
-                Err(e) => {
-                    tracing::error!(server = %name, "mcp tools/list failed: {e:#}");
-                }
-            },
-            Err(e) => {
-                tracing::error!(server = %name, "mcp spawn failed: {e:#}");
+                tracing::info!(
+                    server = %name,
+                    tools = count,
+                    gated = server_cfg.gate_in_pentest,
+                    "mcp server ready"
+                );
+                break;
             }
+            if std::time::Instant::now() >= deadline {
+                tracing::warn!(server = %name, "mcp server not ready within 5s; will populate on next restart");
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
+        out.insert(name.clone(), sup);
     }
     out
 }
