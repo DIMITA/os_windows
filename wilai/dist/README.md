@@ -37,6 +37,21 @@ bind = SUPER, GRAVE,        exec, wilai-overlay --ask
 bind = SUPER, F12,          exec, wilai-voice  # push-to-talk in a small terminal
 ```
 
+## MCP servers
+
+`dist/mcp-examples.toml` collects ready-to-paste `[mcp.<name>]` blocks
+for the servers that come up most: filesystem, git, fetch, GitHub,
+Brave search, sequential-thinking, Playwright browser. Copy the
+sections you want into `~/.config/wilai/wilai.toml`. Each server runs
+under the daemon's supervisor with restart-on-crash and exponential
+backoff (2/4/8/16/30/60s); `wilai mcp list` shows live status,
+`wilai mcp restart <name>` forces a respawn.
+
+Servers marked with a non-local network side-effect (fetch, github,
+brave, browser) keep `gate_in_pentest = true` (the default) so their
+tools become unavailable while `wilai mode` is `pentest`. Local-only
+servers (fs, git, think) are safe to unset that flag.
+
 ## Arch package
 
 `dist/arch/PKGBUILD` builds and installs all four binaries (`wilai`,

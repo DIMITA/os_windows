@@ -1,0 +1,77 @@
+# Example [mcp.<name>] blocks for wilai.toml.
+#
+# Copy the ones you want into ~/.config/wilai/wilai.toml (or /etc/wilai/wilai.toml
+# for a system-wide install). Each block spawns a long-running MCP server
+# under the daemon's supervisor; tools show up in `wilai tool list --daemon`
+# under `mcp.<name>.<tool>` and route through validator + guard + audit
+# like any other Wilai tool.
+#
+# Defaults:
+#   enabled         = true   # skip a block temporarily by flipping to false
+#   gate_in_pentest = true   # tools are unavailable while mode == pentest
+#                            # (kill-switch cloud). Set false only for
+#                            # servers you have vetted as local-only.
+
+# ---- Filesystem access to a directory tree -------------------------------
+# Read + write files under a specified root. Very useful for letting the
+# agent operate on a project sandbox without giving it broad fs access.
+#
+# [mcp.fs]
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-filesystem", "/home/you/projects"]
+# gate_in_pentest = false   # local-only, safe in pentest mode
+
+# ---- Git repository operations --------------------------------------------
+# Read git history, diff, blame, branches, commits.
+#
+# [mcp.git]
+# command = "uvx"
+# args    = ["mcp-server-git", "--repository", "/home/you/projects/my-repo"]
+# gate_in_pentest = false   # reads only, no network
+
+# ---- HTTP fetch -----------------------------------------------------------
+# Fetch a URL and return its content. Sends network traffic - stays behind
+# the pentest gate by default.
+#
+# [mcp.fetch]
+# command = "uvx"
+# args    = ["mcp-server-fetch"]
+
+# ---- GitHub API -----------------------------------------------------------
+# Issues, PRs, code search, repository ops. Requires a personal access
+# token; declare it via env so it does not land in this file.
+#
+# [mcp.github]
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-github"]
+# env     = { GITHUB_PERSONAL_ACCESS_TOKEN = "$GITHUB_PAT" }
+#
+# Note: [env] does not expand shell variables. Either set the literal
+# token here (careful with file mode) or run the daemon with the env
+# var set and reference nothing here - the server will pick up its own
+# env via inheritance.
+
+# ---- Brave Search ---------------------------------------------------------
+# Web + local search via the Brave Search API.
+#
+# [mcp.brave]
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-brave-search"]
+# env     = { BRAVE_API_KEY = "..." }
+
+# ---- Sequential-thinking (agent scaffolding) -----------------------------
+# Provides a "think through this step by step" scratchpad tool. Pure
+# compute, no network or fs.
+#
+# [mcp.think]
+# command = "npx"
+# args    = ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+# gate_in_pentest = false
+
+# ---- Playwright browser automation ---------------------------------------
+# Drive a headless Chromium: navigate, click, extract, screenshot.
+# Consider gating in pentest since scans could hit unintended targets.
+#
+# [mcp.browser]
+# command = "npx"
+# args    = ["-y", "@playwright/mcp"]

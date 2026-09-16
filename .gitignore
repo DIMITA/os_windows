@@ -10,6 +10,9 @@ work/
 # Rust
 wilbar/target/
 **/Cargo.lock
+# ...but wilai/ is a binary distribution — pin its lockfile for
+# reproducible builds and CI --locked.
+!wilai/Cargo.lock
 
 # Wilai binaries are build artifacts staged by scripts/build-iso.sh.
 # The YAML tool registry, systemd unit, and example config in airootfs

@@ -47,6 +47,8 @@ package() {
     # Example config and systemd user unit.
     install -Dm644 config/wilai.toml.example \
         "$pkgdir/usr/share/wilai/wilai.toml.example"
+    install -Dm644 dist/mcp-examples.toml \
+        "$pkgdir/usr/share/wilai/mcp-examples.toml"
     install -Dm644 dist/systemd/wilai.service \
         "$pkgdir/usr/lib/systemd/user/wilai.service"
 
