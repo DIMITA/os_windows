@@ -53,6 +53,8 @@ async fn in_process_service() -> (Arc<Service>, TempDir) {
         confirm_timeout_s: 5,
         mcp: HashMap::new(),
         tools_changed: Arc::new(tokio::sync::Notify::new()),
+        memory: None,
+        embedder: None,
     });
     (service, tmp)
 }

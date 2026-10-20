@@ -77,6 +77,12 @@ async fn main() -> Result<()> {
         Some(spawn_detect(mode.clone(), detect_cfg))
     };
 
+    // Open local memory store + embedder (none when Ollama unreachable).
+    let (memory, embedder) = match wilai_daemon::service::open_memory(&cfg).await {
+        Some((m, e)) => (Some(m), Some(e)),
+        None => (None, None),
+    };
+
     let service = Arc::new(Service {
         cfg: cfg.clone(),
         registry,
@@ -87,6 +93,8 @@ async fn main() -> Result<()> {
         confirm_timeout_s: cfg.general.confirm_timeout_s,
         mcp: mcp_clients,
         tools_changed,
+        memory,
+        embedder,
     });
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);

@@ -1,0 +1,26 @@
+name: memory.fact_get
+version: 1
+description: |-
+  Look up a typed fact in Wilai's memory. If `prefix` is passed instead
+  of `key`, lists every fact whose key starts with that prefix.
+category: read
+risk: none
+
+inputs:
+  key:
+    type: string
+    description: Exact key to look up.
+  prefix:
+    type: string
+    description: Prefix for list mode.
+
+executor:
+  type: builtin
+  fn: memory.fact_get.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 8192
+
+audit:
+  fields: [key, prefix]

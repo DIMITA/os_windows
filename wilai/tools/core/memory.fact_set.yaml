@@ -1,0 +1,27 @@
+name: memory.fact_set
+version: 1
+description: |-
+  Record a typed fact in Wilai's memory, keyed by a dotted name
+  (e.g. "user.name", "project.current"). Overwrites any prior value.
+category: write
+risk: none
+
+inputs:
+  key:
+    type: string
+    required: true
+    description: Dotted key, lowercase.
+  value:
+    type: string
+    required: true
+
+executor:
+  type: builtin
+  fn: memory.fact_set.v1
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 512
+
+audit:
+  fields: [key]

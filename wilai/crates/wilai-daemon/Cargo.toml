@@ -19,6 +19,7 @@ wilai-audit.workspace = true
 wilai-tools.workspace = true
 wilai-providers.workspace = true
 wilai-mcp.workspace = true
+wilai-memory.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

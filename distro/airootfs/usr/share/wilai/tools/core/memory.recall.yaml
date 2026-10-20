@@ -1,0 +1,34 @@
+name: memory.recall
+version: 1
+description: |-
+  Search Wilai's long-term memory for notes semantically close to the
+  query. Returns the top k matches with their scores. All search runs
+  locally against a SQLite store; no cloud call.
+category: read
+risk: none
+
+inputs:
+  query:
+    type: string
+    required: true
+    description: Natural-language query. The agent should describe what it is looking for.
+  k:
+    type: integer
+    min: 1
+    max: 20
+    default: 5
+
+executor:
+  type: builtin
+  fn: memory.recall.v1
+  timeout_s: 10
+  output:
+    capture: stdout
+    max_bytes: 32768
+
+audit:
+  fields: [query, k]
+
+examples:
+  - args: { query: "what does the user prefer in the morning", k: 3 }
+    note: "Fetch morning-related preferences."

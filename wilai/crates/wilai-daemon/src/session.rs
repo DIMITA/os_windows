@@ -90,7 +90,11 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
     let mut history: Vec<Message> = Vec::new();
     let system_prompt = {
         let reg = service.registry.read().await;
-        build_system_prompt(&reg, service.cfg.general.system_prompt.as_deref())
+        build_system_prompt_with_persona(
+            &reg,
+            service.cfg.general.system_prompt.as_deref(),
+            &service.cfg.persona,
+        )
     };
 
     let mut reader = BufReader::new(read_half);
@@ -280,12 +284,39 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
 }
 
 pub fn build_system_prompt(registry: &wilai_tools::Registry, user_extra: Option<&str>) -> String {
+    build_system_prompt_with_persona(registry, user_extra, &wilai_core::PersonaConfig::default())
+}
+
+pub fn build_system_prompt_with_persona(
+    registry: &wilai_tools::Registry,
+    user_extra: Option<&str>,
+    persona: &wilai_core::PersonaConfig,
+) -> String {
     let mut s = String::new();
-    s.push_str(
-        "You are Wilai, a system agent on WilOS Aurora. You assist by calling \
-         typed tools that the host serializes for you. Never produce raw shell \
-         commands; if no tool fits, say so. Be concise.\n\n",
-    );
+    let addr = if persona.address.is_empty() {
+        "the user".to_string()
+    } else {
+        persona.address.clone()
+    };
+    if persona.style == "concise_butler" {
+        s.push_str(&format!(
+            "You are Wilai, a local system agent on WilOS Aurora. You address {addr} \
+             with the composure of a long-serving butler: precise, concise, deferential \
+             without being obsequious. Prefer one or two short sentences. State what you \
+             are about to do before doing it, state what you did after. If a tool fits, \
+             use it; never invent commands. All your providers run on the host — no \
+             cloud. You have access to a persistent local memory: `memory.note` to \
+             record facts worth remembering, `memory.recall` to search by meaning, \
+             `memory.fact_set` / `memory.fact_get` for typed preferences. Use it \
+             naturally; part of your value is that you remember.\n\n"
+        ));
+    } else {
+        s.push_str(
+            "You are Wilai, a system agent on WilOS Aurora. You assist by calling \
+             typed tools that the host serializes for you. Never produce raw shell \
+             commands; if no tool fits, say so. Be concise.\n\n",
+        );
+    }
     s.push_str("Available tools:\n");
     for (name, spec) in registry.iter() {
         s.push_str(&format!("- {name} (v{}): {}\n", spec.version, spec.description));
@@ -571,10 +602,13 @@ async fn execute_call(
     if is_pentest_tool {
         service.mode.pentest_started();
     }
-    // Route MCP-prefixed tools to their backing client; everything else
-    // goes through the local Executor.
+    // Route MCP-prefixed tools to their backing client; memory.*
+    // tools to the local SQLite store; everything else goes through
+    // the local Executor.
     let result_outcome = if let Some((server, mcp_tool)) = parse_mcp_name(&spec.name) {
         run_mcp_tool(service, server, mcp_tool, &validated).await
+    } else if spec.name.starts_with("memory.") {
+        run_memory_tool(service, &spec.name, &validated).await
     } else {
         Executor::run(spec, &validated)
             .await
@@ -639,6 +673,103 @@ fn parse_mcp_name(name: &str) -> Option<(&str, &str)> {
     let rest = name.strip_prefix("mcp.")?;
     let dot = rest.find('.')?;
     Some((&rest[..dot], &rest[dot + 1..]))
+}
+
+async fn run_memory_tool(
+    service: &Service,
+    name: &str,
+    args: &Value,
+) -> Result<wilai_tools::ExecResult> {
+    use std::time::Instant;
+    let store = service
+        .memory
+        .as_ref()
+        .ok_or_else(|| anyhow!("memory not configured"))?;
+    let embedder = service
+        .embedder
+        .as_ref()
+        .ok_or_else(|| anyhow!("memory embedder not configured"))?;
+    let start = Instant::now();
+
+    let text = match name {
+        "memory.note" => {
+            let content = args
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("memory.note: content missing"))?;
+            let tags: Vec<String> = args
+                .get("tags")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.iter().filter_map(|t| t.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let session = args.get("session").and_then(|v| v.as_str());
+            let id = store.note(session, content, &tags, embedder.as_ref()).await?;
+            format!("recorded note {id}")
+        }
+        "memory.recall" => {
+            let query = args
+                .get("query")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("memory.recall: query missing"))?;
+            let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(5) as usize;
+            let hits = store.recall(query, k, embedder.as_ref()).await?;
+            if hits.is_empty() {
+                "no matches".to_string()
+            } else {
+                let mut out = String::new();
+                for h in hits {
+                    out.push_str(&format!(
+                        "- [{:.2}] ({}) {}\n",
+                        h.score,
+                        h.note.created_at,
+                        h.note.content
+                    ));
+                }
+                out
+            }
+        }
+        "memory.fact_set" => {
+            let key = args
+                .get("key")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("memory.fact_set: key missing"))?;
+            let value = args
+                .get("value")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| anyhow!("memory.fact_set: value missing"))?;
+            store.fact_set(key, value)?;
+            format!("set {key}")
+        }
+        "memory.fact_get" => {
+            if let Some(key) = args.get("key").and_then(|v| v.as_str()) {
+                match store.fact_get(key)? {
+                    Some(f) => format!("{} = {} (updated {})", f.key, f.value, f.updated_at),
+                    None => format!("(no fact for {key})"),
+                }
+            } else if let Some(prefix) = args.get("prefix").and_then(|v| v.as_str()) {
+                let facts = store.fact_list(Some(prefix))?;
+                if facts.is_empty() {
+                    "(no facts)".to_string()
+                } else {
+                    facts.iter().map(|f| format!("{} = {}", f.key, f.value)).collect::<Vec<_>>().join("\n")
+                }
+            } else {
+                return Err(anyhow!("memory.fact_get: pass `key` or `prefix`"));
+            }
+        }
+        other => return Err(anyhow!("unknown memory tool: {other}")),
+    };
+
+    let duration_ms = start.elapsed().as_millis() as u64;
+    let total = text.len();
+    Ok(wilai_tools::ExecResult {
+        exit_code: 0,
+        output: text,
+        output_bytes: total,
+        truncated: false,
+        duration_ms,
+        rendered_cmd: Some(vec![format!("memory:{name}")]),
+    })
 }
 
 async fn build_mcp_snapshot(service: &Service) -> Vec<crate::protocol::McpServerInfo> {

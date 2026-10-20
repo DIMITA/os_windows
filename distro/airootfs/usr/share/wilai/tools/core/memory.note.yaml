@@ -1,0 +1,33 @@
+name: memory.note
+version: 1
+description: |-
+  Save a note to Wilai's long-term memory. The note is embedded locally
+  and becomes recallable by meaning via memory.recall.
+category: write
+risk: none
+
+inputs:
+  content:
+    type: string
+    required: true
+    description: The note body. One idea, one note.
+  tags:
+    type: array
+    items: { type: string }
+    default: []
+    description: Optional tags for later filtering.
+
+executor:
+  type: builtin
+  fn: memory.note.v1
+  timeout_s: 10
+  output:
+    capture: stdout
+    max_bytes: 1024
+
+audit:
+  fields: [tags]
+
+examples:
+  - args: { content: "Diana prefers coffee over tea.", tags: ["user.preference"] }
+    note: "Record a user preference."

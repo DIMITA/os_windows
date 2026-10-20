@@ -3,6 +3,6 @@ pub mod mode;
 pub mod paths;
 pub mod types;
 
-pub use config::{Config, McpServerConfig};
+pub use config::{Config, McpServerConfig, PersonaConfig, SecurityConfig};
 pub use mode::Mode;
 pub use types::{Category, Risk, SessionId, ToolCallId, TurnId};

@@ -9,6 +9,7 @@ use wilai_audit::writer::WriteRequest;
 use wilai_audit::AuditWriter;
 use wilai_core::{Config, Mode};
 use wilai_mcp::McpSupervisor;
+use wilai_memory::{Embedder, MemoryStore, OllamaEmbedder};
 use wilai_providers::{AnthropicProvider, OllamaProvider, Provider};
 use wilai_tools::Registry;
 
@@ -25,10 +26,18 @@ pub struct Service {
     /// inserts new tools into the registry. Sessions subscribe to this
     /// and push `ServerEvent::ToolsAdded` to the client when it fires.
     pub tools_changed: Arc<tokio::sync::Notify>,
+    /// Local memory store (SQLite). None when memory is disabled; the
+    /// memory.* tools then return a clean error rather than hanging.
+    pub memory: Option<Arc<MemoryStore>>,
+    /// Embedder for memory.note / memory.recall. Implementations:
+    /// OllamaEmbedder in production, HashEmbedder in tests.
+    pub embedder: Option<Arc<dyn Embedder>>,
 }
 
 impl Service {
-    /// Build a provider, honoring the cloud kill-switch in pentest mode.
+    /// Build a provider, honoring both the security.local_only lock
+    /// (refuse non-local providers unconditionally) and the pentest-mode
+    /// cloud kill-switch (refuse non-local when the mode is Pentest).
     pub async fn build_provider(&self, name: &str) -> Result<Box<dyn Provider>> {
         let pcfg = self
             .cfg
@@ -55,10 +64,17 @@ impl Service {
             }
             other => return Err(anyhow!("provider type {other} not implemented yet")),
         };
-        if self.mode.current().await == Mode::Pentest && !provider.is_local() {
-            return Err(anyhow!(
-                "provider `{name}` is non-local; cloud kill-switch is active in pentest mode"
-            ));
+        if !provider.is_local() {
+            if self.cfg.security.local_only {
+                return Err(anyhow!(
+                    "provider `{name}` is non-local; security.local_only is set, refusing"
+                ));
+            }
+            if self.mode.current().await == Mode::Pentest {
+                return Err(anyhow!(
+                    "provider `{name}` is non-local; cloud kill-switch is active in pentest mode"
+                ));
+            }
         }
         Ok(provider)
     }
@@ -245,9 +261,7 @@ pub async fn open_audit(cfg: &Config) -> Result<(AuditWriter, PathBuf)> {
         .dir
         .clone()
         .map(Ok)
-        .unwrap_or_else(wilai_core::paths::audit_dir)?;
-
-    // Load Ed25519 audit-signing key if one is present at the default path.
+        .unwrap_or_else(wilai_core::paths::audit_dir)?;    // Load Ed25519 audit-signing key if one is present at the default path.
     // Absence is normal (signing is opt-in); a parse error is a hard fail
     // because silently writing unsigned entries would defeat the operator's
     // intent.
@@ -293,4 +307,48 @@ unsafe fn libc_getuid() -> u32 {
 #[cfg(not(unix))]
 unsafe fn libc_getuid() -> u32 {
     0
+}
+
+/// Open (or create) the local memory store under
+/// $XDG_DATA_HOME/wilai/memory/wilai.sqlite and build its embedder
+/// against the configured Ollama endpoint. Returns None if the embedder
+/// cannot be constructed (e.g. no provider configured); the daemon
+/// stays up without memory in that case rather than refusing to boot.
+pub async fn open_memory(
+    cfg: &Config,
+) -> Option<(Arc<MemoryStore>, Arc<dyn Embedder>)> {
+    let data_dir = wilai_core::paths::data_dir().ok()?;
+    let path = data_dir.join("memory").join("wilai.sqlite");
+    let store = match MemoryStore::open(&path) {
+        Ok(s) => Arc::new(s),
+        Err(e) => {
+            tracing::warn!("memory store disabled: {e:#}");
+            return None;
+        }
+    };
+
+    // Embedder: use whichever provider has `local: true` first. Default
+    // to ollama at 127.0.0.1:11434 if no match.
+    let (url, model) = cfg
+        .providers
+        .iter()
+        .find(|(_, p)| p.kind == "ollama" && p.local)
+        .map(|(_, p)| (
+            p.url.clone().unwrap_or_else(|| "http://127.0.0.1:11434".to_string()),
+            "nomic-embed-text".to_string(),
+        ))
+        .unwrap_or_else(|| (
+            "http://127.0.0.1:11434".to_string(),
+            "nomic-embed-text".to_string(),
+        ));
+    match OllamaEmbedder::new(url, model) {
+        Ok(e) => {
+            tracing::info!(embedder = e.name(), "memory ready");
+            Some((store, Arc::new(e) as Arc<dyn Embedder>))
+        }
+        Err(e) => {
+            tracing::warn!("embedder init failed: {e:#}; memory unavailable");
+            None
+        }
+    }
 }

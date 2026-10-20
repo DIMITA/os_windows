@@ -17,6 +17,63 @@ pub struct Config {
     pub mode: ModeConfig,
     #[serde(default)]
     pub mcp: BTreeMap<String, McpServerConfig>,
+    #[serde(default)]
+    pub security: SecurityConfig,
+    #[serde(default)]
+    pub persona: PersonaConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    /// When true, non-local providers (anything with `local = false`) are
+    /// refused even in Normal mode — not just in Pentest. This is the
+    /// hard commitment to a local-only agent: no cloud egress for the
+    /// LLM, embeddings, STT, TTS, or any other model call. Default true.
+    #[serde(default = "default_true")]
+    pub local_only: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self { Self { local_only: true } }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersonaConfig {
+    /// How the agent addresses the user. "" means no address prefix.
+    #[serde(default = "default_address")]
+    pub address: String,
+    /// Short style tag the system prompt layers on. Known values:
+    /// "concise_butler" (Jarvis-like, posed, formal), "neutral".
+    #[serde(default = "default_style")]
+    pub style: String,
+    /// piper voice model file name (without extension). Resolved from
+    /// $XDG_DATA_HOME/wilai/models/.
+    #[serde(default = "default_voice")]
+    pub voice_model: String,
+    /// How often the agent is allowed to open a dialogue on its own
+    /// per hour (watchers, scheduled nudges). 0 = never proactive.
+    #[serde(default = "default_quota")]
+    pub quota_per_hour: u32,
+    #[serde(default = "default_proactivity")]
+    pub proactivity: String,
+}
+
+fn default_address() -> String { "Monsieur".to_string() }
+fn default_style() -> String { "concise_butler".to_string() }
+fn default_voice() -> String { "en_GB-alan-medium".to_string() }
+fn default_quota() -> u32 { 3 }
+fn default_proactivity() -> String { "medium".to_string() }
+
+impl Default for PersonaConfig {
+    fn default() -> Self {
+        Self {
+            address: default_address(),
+            style: default_style(),
+            voice_model: default_voice(),
+            quota_per_hour: default_quota(),
+            proactivity: default_proactivity(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -59,6 +116,8 @@ impl Default for Config {
             audit: AuditConfig::default(),
             mode: ModeConfig::default(),
             mcp: BTreeMap::new(),
+            security: SecurityConfig::default(),
+            persona: PersonaConfig::default(),
         }
     }
 }

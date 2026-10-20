@@ -6,6 +6,7 @@ members = [
     "crates/wilai-tools",
     "crates/wilai-providers",
     "crates/wilai-mcp",
+    "crates/wilai-memory",
     "crates/wilai-daemon",
     "crates/wilai-voice",
     "crates/wilai-overlay",
@@ -36,6 +37,7 @@ sha2 = "0.10"
 hex = "0.4"
 async-trait = "0.1"
 dirs = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand_core = { version = "0.6", features = ["std"] }
 
@@ -45,6 +47,7 @@ wilai-tools = { path = "crates/wilai-tools" }
 wilai-providers = { path = "crates/wilai-providers" }
 wilai-daemon = { path = "crates/wilai-daemon" }
 wilai-mcp = { path = "crates/wilai-mcp" }
+wilai-memory = { path = "crates/wilai-memory" }
 wilai-voice = { path = "crates/wilai-voice" }
 wilai-overlay = { path = "crates/wilai-overlay" }
 
