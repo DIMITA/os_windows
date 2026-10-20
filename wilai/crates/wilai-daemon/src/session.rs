@@ -74,6 +74,12 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
     // happening elsewhere in the daemon.
     let mode_changes = service.mode.subscribe().await;
     spawn_mode_relay(mode_changes, event_tx.clone(), service.mode.clone());
+    // Subscribe to tool registry changes (backfill, manual McpResync).
+    spawn_tools_relay(
+        service.tools_changed.clone(),
+        service.registry.clone(),
+        event_tx.clone(),
+    );
 
     // Reader loop: parse client ops; for ConfirmAnswer, deliver via pending; for
     // Prompt, run the agent loop; for Quit, break.
@@ -182,7 +188,10 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                     &service.mcp,
                 )
                 .await;
-                tracing::info!(added, "mcp resync");
+                tracing::info!(count = added.len(), "mcp resync");
+                if !added.is_empty() {
+                    service.tools_changed.notify_waiters();
+                }
                 let servers = build_mcp_snapshot(&service).await;
                 let _ = event_tx.send(ServerEvent::McpServers { servers }).await;
             }
@@ -704,6 +713,44 @@ fn spawn_mode_relay(
                     current: cur.to_string(),
                     pentest_in_flight: mode.pentest_in_flight(),
                 })
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_tools_relay(
+    notify: std::sync::Arc<tokio::sync::Notify>,
+    registry: std::sync::Arc<tokio::sync::RwLock<wilai_tools::Registry>>,
+    event_tx: mpsc::Sender<ServerEvent>,
+) {
+    tokio::spawn(async move {
+        // Track names we have already announced so re-fires only push
+        // the delta. A dedicated set is cheaper than resending the full
+        // list every time.
+        let mut known: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        {
+            let reg = registry.read().await;
+            for (name, _) in reg.iter() {
+                known.insert(name.to_string());
+            }
+        }
+        loop {
+            notify.notified().await;
+            let current: std::collections::BTreeSet<String> = {
+                let reg = registry.read().await;
+                reg.iter().map(|(n, _)| n.to_string()).collect()
+            };
+            let fresh: Vec<String> = current.difference(&known).cloned().collect();
+            if fresh.is_empty() {
+                continue;
+            }
+            known = current;
+            if event_tx
+                .send(ServerEvent::ToolsAdded { names: fresh })
                 .await
                 .is_err()
             {

@@ -149,6 +149,9 @@ async fn drive_session(cli: &Cli, socket: &Path, prompt: &str) -> Result<()> {
                 notify(cli, "Wilai mode", &current, urgency).await;
             }
             ServerEvent::Tools { .. } => {}
+            ServerEvent::ToolsAdded { names } => {
+                notify(cli, "Wilai tools", &format!("+{} new", names.len()), "low").await;
+            }
             ServerEvent::McpServers { .. } => {}
         }
     }

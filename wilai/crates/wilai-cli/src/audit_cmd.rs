@@ -232,3 +232,92 @@ pub fn keygen(out: Option<&std::path::Path>) -> Result<()> {
     println!("fp:      {}", signer.fingerprint());
     Ok(())
 }
+
+/// Replay a session's tool.exec entries in order. Dry-run only in v2:
+/// we print what would be executed and whether the live registry still
+/// has the tool at the recorded version, but we do not run anything.
+/// This lets an operator reconstruct a session without the risk of a
+/// double-execution of a write-category or destructive tool.
+pub fn replay(session: &str, allow_destructive: bool) -> Result<()> {
+    let dir = audit_dir()?;
+    if !dir.exists() {
+        return Err(anyhow::anyhow!("no audit dir at {}", dir.display()));
+    }
+    let cfg = wilai_core::Config::load().unwrap_or_default();
+    let dirs = crate::collect_tool_dirs(&cfg);
+    let registry = wilai_tools::Registry::load_from_dirs(&dirs, &cfg.tools.disabled)?;
+
+    let files = list_files(&dir)?;
+    let mut replayed = 0u64;
+    let mut skipped = 0u64;
+    let mut n_entries = 0u64;
+
+    for f in &files {
+        let text = fs::read_to_string(f)
+            .with_context(|| format!("read {}", f.display()))?;
+        for line in text.lines() {
+            let v: Value = match serde_json::from_str(line) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if v.get("session").and_then(|s| s.as_str()) != Some(session) {
+                continue;
+            }
+            if v.get("kind").and_then(|s| s.as_str()) != Some("tool.exec") {
+                continue;
+            }
+            n_entries += 1;
+            let tool_name = v
+                .get("tool")
+                .and_then(|t| t.get("name"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("<?>");
+            let recorded_cat = v
+                .get("tool")
+                .and_then(|t| t.get("category"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("?");
+            let recorded_risk = v
+                .get("tool")
+                .and_then(|t| t.get("risk"))
+                .and_then(|n| n.as_str())
+                .unwrap_or("?");
+            let recorded_ver = v
+                .get("tool")
+                .and_then(|t| t.get("version"))
+                .and_then(|n| n.as_u64())
+                .unwrap_or(0);
+            let args = v.get("args").cloned().unwrap_or(Value::Null);
+            let cmd = v.get("cmd");
+
+            if !allow_destructive
+                && matches!(recorded_cat, "destructive" | "pentest")
+            {
+                println!(
+                    "SKIP {tool_name} (category={recorded_cat}): pass --allow-destructive to preview"
+                );
+                skipped += 1;
+                continue;
+            }
+
+            print!("REPLAY {tool_name} v{recorded_ver} ({recorded_cat}/{recorded_risk})");
+            match registry.get(tool_name) {
+                None => println!("  [tool no longer installed]"),
+                Some(spec) if spec.version as u64 != recorded_ver => {
+                    println!("  [version drift: recorded v{recorded_ver}, now v{}]", spec.version);
+                }
+                Some(_) => println!(),
+            }
+            if let Some(cmd) = cmd {
+                println!("  cmd:  {cmd}");
+            }
+            println!("  args: {args}");
+            replayed += 1;
+        }
+    }
+
+    println!(
+        "\n{n_entries} tool.exec entries for session {session}: {replayed} previewed, {skipped} skipped"
+    );
+    Ok(())
+}

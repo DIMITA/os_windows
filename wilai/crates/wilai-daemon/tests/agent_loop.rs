@@ -52,6 +52,7 @@ async fn in_process_service() -> (Arc<Service>, TempDir) {
         default_model: "mock-1".to_string(),
         confirm_timeout_s: 5,
         mcp: HashMap::new(),
+        tools_changed: Arc::new(tokio::sync::Notify::new()),
     });
     (service, tmp)
 }

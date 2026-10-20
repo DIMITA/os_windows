@@ -363,18 +363,21 @@ suitable for piping to `less` or to a report. The output groups
 readability. Multiple sessions with overlapping timelines are
 isolated by the `session` field.
 
-`replay` is intentionally limited:
+`replay` is intentionally limited (and in v2.x is dry-run only):
 
-- It re-runs only `tool.exec` entries whose tool is still installed at
-  the same major version.
-- It refuses to replay `destructive` or `pentest` categories without
-  an explicit `--allow-category <cat>` flag.
-- It runs each tool through the live policy engine; if a guard now
-  denies what it allowed then, the replay stops and the operator is
-  shown the divergence.
-- Replay does not modify the audit log of the original session; new
-  entries land in the current day's file with a fresh session id and
-  a `replay_of` field pointing at the original.
+- It walks the audit log, filters `tool.exec` entries by session, and
+  prints the executor/argv/args that would run alongside the tool's
+  current registry state (missing / version-drifted / in-sync).
+- It does NOT execute the tool. A double-execution of a write-category
+  or destructive tool is too risky to run blind, and reconstructing
+  side-effects after the fact is unreliable; the dry-run is the
+  forensic artifact.
+- `destructive` and `pentest` categories are skipped unless the
+  operator passes `--allow-destructive` to preview them.
+- Replay does not modify the audit log of the original session; if a
+  future version adds live replay, new entries would land in the
+  current day's file with a fresh session id and a `replay_of` field
+  pointing at the original.
 
 ## 9. Privacy
 

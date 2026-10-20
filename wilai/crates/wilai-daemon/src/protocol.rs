@@ -79,6 +79,10 @@ pub enum ServerEvent {
     },
     /// Snapshot of the live tool registry (response to `ToolsList`).
     Tools { tools: Vec<ToolSummary> },
+    /// Pushed asynchronously when the daemon registers new tools (e.g.
+    /// a late-starting MCP server finally came up). Clients can act on
+    /// this to refresh their UI without polling.
+    ToolsAdded { names: Vec<String> },
     /// Snapshot of MCP supervisor state (response to `McpList` / `McpRestart`).
     McpServers { servers: Vec<McpServerInfo> },
     /// Final event before the connection closes.

@@ -85,7 +85,8 @@ async fn backfill_registers_tools_after_supervisor_warms_up() {
 
     // Backfill.
     let added = backfill_mcp_tools(&cfg, &registry, &mcp).await;
-    assert_eq!(added, 1, "expected 1 tool added");
+    assert_eq!(added.len(), 1, "expected 1 tool added, got {added:?}");
+    assert_eq!(added[0], "mcp.late.echo");
 
     // Post-condition: registry has `mcp.late.echo`.
     {
@@ -95,7 +96,7 @@ async fn backfill_registers_tools_after_supervisor_warms_up() {
 
     // Second call is a no-op: tool already there.
     let added_again = backfill_mcp_tools(&cfg, &registry, &mcp).await;
-    assert_eq!(added_again, 0);
+    assert!(added_again.is_empty());
 
     // Sanity: a Service built with this registry sees the tool through
     // the same lock pathway run_turn uses.
@@ -108,5 +109,6 @@ async fn backfill_registers_tools_after_supervisor_warms_up() {
         default_model: "mock-1".to_string(),
         confirm_timeout_s: 5,
         mcp,
+        tools_changed: Arc::new(tokio::sync::Notify::new()),
     });
 }

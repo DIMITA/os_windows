@@ -50,10 +50,12 @@ async fn main() -> Result<()> {
 
     // Periodic backfill: catches tools from supervisors that bring their
     // servers up after the init_mcp grace period expired.
+    let tools_changed = std::sync::Arc::new(tokio::sync::Notify::new());
     let _backfill_handle = wilai_daemon::service::spawn_backfill_task(
         cfg.clone(),
         registry.clone(),
         mcp_clients.clone(),
+        tools_changed.clone(),
         30,
     );
 
@@ -84,6 +86,7 @@ async fn main() -> Result<()> {
         default_model: cfg.general.default_model,
         confirm_timeout_s: cfg.general.confirm_timeout_s,
         mcp: mcp_clients,
+        tools_changed,
     });
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);

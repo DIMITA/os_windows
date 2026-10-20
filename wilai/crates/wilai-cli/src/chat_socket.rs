@@ -157,6 +157,9 @@ where
                 eprintln!("[mode] {current} (pentest in flight: {pentest_in_flight})");
             }
             ServerEvent::Tools { .. } => {}
+            ServerEvent::ToolsAdded { names } => {
+                eprintln!("[tools] registered: {}", names.join(", "));
+            }
             ServerEvent::McpServers { .. } => {}
         }
     }

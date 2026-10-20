@@ -118,16 +118,25 @@ enum AuditCmd {
     Show { session: String },
     /// Verify the hash chain (and signatures, if a public key is present).
     Verify {
-        /// Treat missing signatures as failures (default: warn-only).
         #[arg(long)]
         require_sig: bool,
     },
     /// Generate a fresh Ed25519 audit-signing keypair under
     /// ~/.local/share/wilai/keys/. Refuses to overwrite an existing key.
     Keygen {
-        /// Path to write the private key to.
         #[arg(long)]
         out: Option<std::path::PathBuf>,
+    },
+    /// Replay a prior session's tool.exec entries. Dry-run only in v2:
+    /// prints the executor/argv that would run, with the current
+    /// registry's permission (mode / guards) checked against the
+    /// recorded args. Does not execute anything.
+    Replay {
+        session: String,
+        /// Allow destructive/pentest categories in the dry-run preview.
+        /// The default is to skip those entries with a note.
+        #[arg(long)]
+        allow_destructive: bool,
     },
 }
 
@@ -196,6 +205,9 @@ async fn main() -> Result<()> {
             AuditCmd::Show { session } => audit_cmd::show(&session),
             AuditCmd::Verify { require_sig } => audit_cmd::verify(require_sig),
             AuditCmd::Keygen { out } => audit_cmd::keygen(out.as_deref()),
+            AuditCmd::Replay { session, allow_destructive } => {
+                audit_cmd::replay(&session, allow_destructive)
+            }
         },
         Cmd::Tool { sub } => match sub {
             ToolCmd::List { daemon, socket } => {

@@ -14,18 +14,17 @@ use wilai_tools::Registry;
 
 pub struct Service {
     pub cfg: Config,
-    /// Shared tool registry. Wrapped in RwLock so the background MCP
-    /// backfill task can insert tools that weren't ready at daemon
-    /// startup (e.g. a server that took longer than init_mcp's 5s
-    /// grace period to spawn).
     pub registry: Arc<RwLock<Registry>>,
     pub audit_tx: mpsc::Sender<WriteRequest>,
     pub mode: Arc<ModeManager>,
     pub default_provider: String,
     pub default_model: String,
     pub confirm_timeout_s: u32,
-    /// Map from server name to its supervisor.
     pub mcp: HashMap<String, Arc<McpSupervisor>>,
+    /// Notified every time the backfill task or an on-demand resync
+    /// inserts new tools into the registry. Sessions subscribe to this
+    /// and push `ServerEvent::ToolsAdded` to the client when it fires.
+    pub tools_changed: Arc<tokio::sync::Notify>,
 }
 
 impl Service {
@@ -123,17 +122,17 @@ pub async fn init_mcp(
 }
 
 /// Scan every supervisor's cached tools list and insert anything the
-/// registry doesn't have yet. Returns the number of tools added. Called
-/// at startup grace-period expiry, after a manual restart, and
-/// periodically from a background task so tools that take long to
-/// become available still land in the registry without a daemon
-/// restart.
+/// registry doesn't have yet. Returns the list of newly-inserted tool
+/// names (full `mcp.<server>.<tool>` form). Called at startup grace-period
+/// expiry, after a manual restart, and periodically from a background
+/// task so tools that take long to become available still land in the
+/// registry without a daemon restart.
 pub async fn backfill_mcp_tools(
     cfg: &Config,
     registry: &Arc<RwLock<Registry>>,
     mcp: &HashMap<String, Arc<McpSupervisor>>,
-) -> usize {
-    let mut added = 0;
+) -> Vec<String> {
+    let mut added: Vec<String> = Vec::new();
     for (name, sup) in mcp {
         let tools = sup.tools().await;
         if tools.is_empty() {
@@ -153,32 +152,35 @@ pub async fn backfill_mcp_tools(
             match wilai_mcp::convert::descriptor_to_spec_with_gate(name, desc, gated) {
                 Ok(spec) => {
                     reg.insert_dynamic(spec);
-                    added += 1;
+                    added.push(tool_name);
                 }
                 Err(e) => tracing::warn!(server = %name, tool = %desc.name, "skip mcp tool: {e:#}"),
             }
         }
     }
-    if added > 0 {
-        tracing::info!(added, "mcp backfill: new tools registered");
+    if !added.is_empty() {
+        tracing::info!(count = added.len(), "mcp backfill: new tools registered");
     }
     added
 }
 
-/// Background task that calls `backfill_mcp_tools` on a fixed interval.
-/// Catches tools from supervisors that come up late (slow npm install,
-/// transient network, backoff ladder) without requiring a daemon restart.
+/// Background task that calls `backfill_mcp_tools` on a fixed interval,
+/// notifying the provided tools_changed when it adds anything.
 pub fn spawn_backfill_task(
     cfg: Config,
     registry: Arc<RwLock<Registry>>,
     mcp: HashMap<String, Arc<McpSupervisor>>,
+    tools_changed: Arc<tokio::sync::Notify>,
     interval_s: u64,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let dur = std::time::Duration::from_secs(interval_s);
         loop {
             tokio::time::sleep(dur).await;
-            let _ = backfill_mcp_tools(&cfg, &registry, &mcp).await;
+            let added = backfill_mcp_tools(&cfg, &registry, &mcp).await;
+            if !added.is_empty() {
+                tools_changed.notify_waiters();
+            }
         }
     })
 }
