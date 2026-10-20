@@ -256,7 +256,7 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
     result
 }
 
-fn build_system_prompt(registry: &wilai_tools::Registry, user_extra: Option<&str>) -> String {
+pub fn build_system_prompt(registry: &wilai_tools::Registry, user_extra: Option<&str>) -> String {
     let mut s = String::new();
     s.push_str(
         "You are Wilai, a system agent on WilOS Aurora. You assist by calling \
@@ -274,7 +274,7 @@ fn build_system_prompt(registry: &wilai_tools::Registry, user_extra: Option<&str
     s
 }
 
-async fn run_turn(
+pub async fn run_turn(
     service: &Service,
     session_id: &str,
     system_prompt: &str,
