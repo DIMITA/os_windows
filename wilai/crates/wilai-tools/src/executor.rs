@@ -48,10 +48,16 @@ impl Executor {
                 })
             }
             ExecutorSpec::Subprocess(s) => {
-                let argv = render_argv(&s.cmd, args)?;
-                if argv.is_empty() {
+                let rendered = render_argv(&s.cmd, args)?;
+                if rendered.is_empty() {
                     bail!("empty argv");
                 }
+                // Apply sandbox wrapping on the rendered argv's binary.
+                let argv = crate::sandbox::render_argv(
+                    &rendered[0],
+                    &rendered[1..],
+                    s.sandbox.as_ref(),
+                );
                 let start = Instant::now();
                 let mut cmd = Command::new(&argv[0]);
                 cmd.args(&argv[1..]);

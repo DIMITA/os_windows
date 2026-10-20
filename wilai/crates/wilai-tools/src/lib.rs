@@ -4,6 +4,7 @@ pub mod executor;
 pub mod guards;
 pub mod patterns;
 pub mod registry;
+pub mod sandbox;
 pub mod spec;
 pub mod validator;
 
@@ -11,4 +12,4 @@ pub use confirm::{ConfirmAnswer, ConfirmDefault, Confirmer, FixedConfirmer, TtyC
 pub use executor::{ExecResult, Executor};
 pub use guards::GuardOutcome;
 pub use registry::Registry;
-pub use spec::{ExecutorSpec, InputSpec, ToolSpec};
+pub use spec::{ExecutorSpec, InputSpec, SandboxSpec, ToolSpec};

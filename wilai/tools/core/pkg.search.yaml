@@ -17,6 +17,16 @@ executor:
   output:
     capture: stdout
     max_bytes: 131072
+  # pacman -Ss reads /var/lib/pacman and friends. Lock it into a
+  # read-only sandbox with no network: pacman has a sync cache so
+  # even a Ss should not need to talk to a mirror.
+  sandbox:
+    kind: bwrap
+    bind_ro:
+      - /usr
+      - /etc
+      - /var/lib/pacman
+    network: false
 
 audit:
   fields: [query]

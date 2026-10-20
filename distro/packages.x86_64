@@ -153,3 +153,4 @@ libnotify
 ollama
 alsa-utils
 nmap
+bubblewrap

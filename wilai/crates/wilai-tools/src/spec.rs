@@ -88,6 +88,48 @@ pub struct SubprocessSpec {
     pub stdin: Option<String>,
     pub timeout_s: u32,
     pub output: OutputSpec,
+    /// Optional sandbox configuration. When present and the host has
+    /// `bwrap` (bubblewrap) on PATH, the executor wraps the command in
+    /// bwrap with the declared binds and network policy. If bwrap is
+    /// missing, the daemon logs a warning on first use and falls back
+    /// to running the command unsandboxed (graceful degradation).
+    #[serde(default)]
+    pub sandbox: Option<SandboxSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum SandboxSpec {
+    /// bubblewrap sandbox (Linux). Paths are passed verbatim to
+    /// `--ro-bind` / `--bind`; network is `unshare_net` unless true.
+    Bwrap {
+        #[serde(default = "default_ro_bind")]
+        bind_ro: Vec<String>,
+        #[serde(default)]
+        bind_rw: Vec<String>,
+        #[serde(default)]
+        tmpfs: Vec<String>,
+        /// Whether the sandboxed process can touch the network. Default
+        /// is false (unshare the net namespace).
+        #[serde(default)]
+        network: bool,
+        /// Pass through specific env vars by name. The daemon already
+        /// filters at the executor boundary; this is for white-listing
+        /// vars like HOME inside the sandbox.
+        #[serde(default)]
+        pass_env: Vec<String>,
+    },
+}
+
+fn default_ro_bind() -> Vec<String> {
+    vec![
+        "/usr".to_string(),
+        "/lib".to_string(),
+        "/lib64".to_string(),
+        "/bin".to_string(),
+        "/sbin".to_string(),
+        "/etc".to_string(),
+    ]
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

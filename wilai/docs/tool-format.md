@@ -186,6 +186,34 @@ terminal must say so via a `tty: true` flag (not in v0.5).
 
 Timeouts are enforced with `SIGTERM` then `SIGKILL` after 5 seconds.
 
+#### Sandboxing (v3.0+)
+
+A subprocess tool may opt into bubblewrap isolation via a top-level
+`sandbox` block. The executor rewrites the argv to run under `bwrap`
+with the declared binds and network policy; absent `bwrap` on PATH,
+the daemon logs a warning on first use and runs the tool unsandboxed.
+
+```yaml
+executor:
+  type: subprocess
+  cmd: ["pacman", "-Ss", "{query}"]
+  timeout_s: 30
+  output: { capture: stdout, max_bytes: 131072 }
+  sandbox:
+    kind: bwrap
+    bind_ro:  [/usr, /etc, /var/lib/pacman]
+    bind_rw:  []
+    tmpfs:    []
+    network:  false
+```
+
+Default bind_ro covers `/usr /lib /lib64 /bin /sbin /etc`. The sandbox
+always applies `--unshare-pid --unshare-ipc --unshare-uts --unshare-net`
+(unless `network: true`), `--die-with-parent`, `--new-session`, a
+fresh `/proc`, a `/tmp` tmpfs, and a `--dev /dev` stub. The operator
+can override the bwrap binary path with `WILAI_BWRAP` for pinning or
+testing.
+
 ### `builtin`
 
 A function in `wilai-tools::builtins`. Used for `fs.read`, `fs.list`,
