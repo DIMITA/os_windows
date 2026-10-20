@@ -650,6 +650,7 @@ async fn build_mcp_snapshot(service: &Service) -> Vec<crate::protocol::McpServer
             tool_count: status.tool_count,
             last_error: status.last_error,
             gated_in_pentest: gated,
+            fatal: status.fatal,
         });
     }
     out.sort_by(|a, b| a.name.cmp(&b.name));

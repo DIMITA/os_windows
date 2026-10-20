@@ -72,7 +72,13 @@ fn render(servers: &[McpServerInfo], json: bool) -> Result<()> {
         "NAME", "STATUS", "UPTIME", "RESTARTS", "TOOLS", "PENTEST"
     );
     for s in servers {
-        let status = if s.alive { "alive" } else { "down" };
+        let status = if s.fatal {
+            "FATAL"
+        } else if s.alive {
+            "alive"
+        } else {
+            "down"
+        };
         let uptime = match s.uptime_s {
             Some(0) => "0s".to_string(),
             Some(u) if u < 60 => format!("{u}s"),

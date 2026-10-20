@@ -67,3 +67,45 @@ async fn supervisor_restarts_after_kill() {
         .expect("call_tool after restart");
     assert!(res.content.iter().any(|c| c.render().contains("post-restart")));
 }
+
+#[tokio::test]
+async fn supervisor_marks_fatal_when_binary_is_missing() {
+    // The whole point: no infinite tight-loop on a typo in the config.
+    // Backoff steps are 2/4/8s for the first few failures; after 5
+    // consecutive we expect `fatal = true`. Allow up to 25s.
+    let env = BTreeMap::new();
+    let sup = McpSupervisor::spawn(
+        "ghost",
+        "/this/binary/does/not/exist",
+        &[],
+        &env,
+    )
+    .await;
+
+    // Backoff ladder (1/2/4s) means the 4th failure happens around
+    // t = 7s. Allow 15s margin.
+    let deadline = std::time::Instant::now() + Duration::from_secs(15);
+    let mut saw_fatal = false;
+    while std::time::Instant::now() < deadline {
+        let s = sup.status().await;
+        if s.fatal {
+            saw_fatal = true;
+            assert!(s.last_error.is_some(), "expected a last_error with fatal");
+            assert!(!s.alive);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    assert!(
+        saw_fatal,
+        "supervisor should have given up after 5 spawn failures"
+    );
+
+    // A tool call returns a clean error, not a hang.
+    let err = sup
+        .call_tool("anything", serde_json::json!({}))
+        .await
+        .err()
+        .expect("call_tool on fatal server should fail fast");
+    assert!(format!("{err:#}").contains("not alive"));
+}

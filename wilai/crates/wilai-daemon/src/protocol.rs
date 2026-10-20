@@ -94,6 +94,11 @@ pub struct McpServerInfo {
     pub tool_count: usize,
     pub last_error: Option<String>,
     pub gated_in_pentest: bool,
+    /// True when the supervisor has given up retrying because the
+    /// server failed to spawn too many times (typically: wrong binary
+    /// name). Clear with `wilai mcp restart <name>`.
+    #[serde(default)]
+    pub fatal: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -7,12 +7,16 @@ use crate::wire::{CallToolResult, McpToolDescriptor};
 use anyhow::{anyhow, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Notify, RwLock};
 
-const BACKOFF_STEPS: &[u64] = &[2, 4, 8, 16, 30, 60];
+const BACKOFF_STEPS: &[u64] = &[1, 2, 4, 8, 16, 30, 60];
+/// After this many consecutive spawn failures with the same error
+/// (typical case: binary not on PATH), the supervisor stops retrying
+/// and sits idle until an operator calls `restart_now()`.
+const FATAL_AFTER_CONSECUTIVE_FAILURES: u32 = 4;
 
 #[derive(Debug, Clone)]
 pub struct SupervisorStatus {
@@ -22,6 +26,9 @@ pub struct SupervisorStatus {
     pub restart_count: u32,
     pub tool_count: usize,
     pub last_error: Option<String>,
+    /// True when the supervisor has given up retrying after too many
+    /// consecutive spawn failures. Cleared by `restart_now()`.
+    pub fatal: bool,
 }
 
 pub struct McpSupervisor {
@@ -29,15 +36,13 @@ pub struct McpSupervisor {
     command: String,
     args: Vec<String>,
     env: BTreeMap<String, String>,
-    /// Current live client. None while restarting or spawning.
     client: RwLock<Option<Arc<McpClient>>>,
-    /// Last successful tools/list snapshot. Never wiped on restart so
-    /// callers can list expected tools even while the server is down.
     tools: RwLock<Vec<McpToolDescriptor>>,
     restart_count: AtomicU32,
+    consecutive_spawn_failures: AtomicU32,
+    fatal: AtomicBool,
     last_error: Mutex<Option<String>>,
     started_at: Mutex<Option<Instant>>,
-    /// Notified by `restart_now()` to interrupt the backoff sleep.
     kick: Notify,
     _task: Mutex<Option<tokio::task::JoinHandle<()>>>,
 }
@@ -59,6 +64,8 @@ impl McpSupervisor {
             client: RwLock::new(None),
             tools: RwLock::new(Vec::new()),
             restart_count: AtomicU32::new(0),
+            consecutive_spawn_failures: AtomicU32::new(0),
+            fatal: AtomicBool::new(false),
             last_error: Mutex::new(None),
             started_at: Mutex::new(None),
             kick: Notify::new(),
@@ -75,10 +82,18 @@ impl McpSupervisor {
     async fn run(self: Arc<Self>) {
         let mut backoff_idx = 0usize;
         loop {
+            // Fatal state: wait for an explicit kick before trying again.
+            if self.fatal.load(Ordering::SeqCst) {
+                self.kick.notified().await;
+                self.fatal.store(false, Ordering::SeqCst);
+                self.consecutive_spawn_failures.store(0, Ordering::SeqCst);
+                backoff_idx = 0;
+            }
+
             match McpClient::spawn(&self.name, &self.command, &self.args, &self.env).await {
                 Ok(client) => {
-                    // Successful spawn: reset backoff, publish client + tools.
                     backoff_idx = 0;
+                    self.consecutive_spawn_failures.store(0, Ordering::SeqCst);
                     *self.started_at.lock().await = Some(Instant::now());
                     *self.last_error.lock().await = None;
                     match client.list_tools().await {
@@ -93,7 +108,6 @@ impl McpSupervisor {
                     }
                     *self.client.write().await = Some(client.clone());
 
-                    // Wait for the process to close (or an explicit kick).
                     tokio::select! {
                         _ = client.wait_closed() => {
                             tracing::warn!(server = %self.name, "mcp supervisor: server exited");
@@ -105,7 +119,6 @@ impl McpSupervisor {
                         }
                     }
 
-                    // Server is gone; clear state, bump counter, backoff.
                     *self.client.write().await = None;
                     *self.started_at.lock().await = None;
                     self.restart_count.fetch_add(1, Ordering::SeqCst);
@@ -113,7 +126,21 @@ impl McpSupervisor {
                 Err(e) => {
                     *self.last_error.lock().await = Some(format!("{e:#}"));
                     self.restart_count.fetch_add(1, Ordering::SeqCst);
-                    tracing::warn!(server = %self.name, "mcp supervisor: spawn failed: {e:#}");
+                    let n = self.consecutive_spawn_failures.fetch_add(1, Ordering::SeqCst) + 1;
+                    tracing::warn!(
+                        server = %self.name,
+                        attempt = n,
+                        "mcp supervisor: spawn failed: {e:#}"
+                    );
+                    if n >= FATAL_AFTER_CONSECUTIVE_FAILURES {
+                        self.fatal.store(true, Ordering::SeqCst);
+                        tracing::error!(
+                            server = %self.name,
+                            attempts = n,
+                            "mcp supervisor: too many spawn failures; marking fatal (wilai mcp restart <name> to retry)"
+                        );
+                        continue; // top of loop handles the wait-for-kick
+                    }
                 }
             }
 
@@ -166,6 +193,7 @@ impl McpSupervisor {
             restart_count,
             tool_count,
             last_error,
+            fatal: self.fatal.load(Ordering::SeqCst),
         }
     }
 }
