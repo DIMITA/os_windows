@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use wilai_audit::writer::WriteRequest;
 use wilai_audit::AuditWriter;
 use wilai_core::{Config, Mode};
@@ -14,15 +14,17 @@ use wilai_tools::Registry;
 
 pub struct Service {
     pub cfg: Config,
-    pub registry: Registry,
+    /// Shared tool registry. Wrapped in RwLock so the background MCP
+    /// backfill task can insert tools that weren't ready at daemon
+    /// startup (e.g. a server that took longer than init_mcp's 5s
+    /// grace period to spawn).
+    pub registry: Arc<RwLock<Registry>>,
     pub audit_tx: mpsc::Sender<WriteRequest>,
     pub mode: Arc<ModeManager>,
     pub default_provider: String,
     pub default_model: String,
     pub confirm_timeout_s: u32,
-    /// Map from server name to its supervisor. The supervisor keeps the
-    /// underlying MCP client alive across crashes with exponential
-    /// backoff.
+    /// Map from server name to its supervisor.
     pub mcp: HashMap<String, Arc<McpSupervisor>>,
 }
 
@@ -71,7 +73,7 @@ impl Service {
 /// successful restart cycle.
 pub async fn init_mcp(
     cfg: &Config,
-    registry: &mut Registry,
+    registry: &Arc<RwLock<Registry>>,
 ) -> HashMap<String, Arc<McpSupervisor>> {
     use std::time::Duration;
     let mut out: HashMap<String, Arc<McpSupervisor>> = HashMap::new();
@@ -82,14 +84,12 @@ pub async fn init_mcp(
         }
         let sup = McpSupervisor::spawn(name, &server_cfg.command, &server_cfg.args, &server_cfg.env).await;
 
-        // Wait up to 5s for the initial spawn to complete and tools to
-        // be listed. If it takes longer, register with 0 tools and let
-        // the supervisor loop backfill.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
         loop {
             let tools = sup.tools().await;
             if !tools.is_empty() {
                 let mut count = 0;
+                let mut reg = registry.write().await;
                 for desc in &tools {
                     match wilai_mcp::convert::descriptor_to_spec_with_gate(
                         name,
@@ -97,7 +97,7 @@ pub async fn init_mcp(
                         server_cfg.gate_in_pentest,
                     ) {
                         Ok(spec) => {
-                            registry.insert_dynamic(spec);
+                            reg.insert_dynamic(spec);
                             count += 1;
                         }
                         Err(e) => tracing::warn!(server = %name, tool = %desc.name, "skip mcp tool: {e:#}"),
@@ -112,7 +112,7 @@ pub async fn init_mcp(
                 break;
             }
             if std::time::Instant::now() >= deadline {
-                tracing::warn!(server = %name, "mcp server not ready within 5s; will populate on next restart");
+                tracing::warn!(server = %name, "mcp server not ready within 5s; backfill task will pick it up");
                 break;
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
@@ -120,6 +120,67 @@ pub async fn init_mcp(
         out.insert(name.clone(), sup);
     }
     out
+}
+
+/// Scan every supervisor's cached tools list and insert anything the
+/// registry doesn't have yet. Returns the number of tools added. Called
+/// at startup grace-period expiry, after a manual restart, and
+/// periodically from a background task so tools that take long to
+/// become available still land in the registry without a daemon
+/// restart.
+pub async fn backfill_mcp_tools(
+    cfg: &Config,
+    registry: &Arc<RwLock<Registry>>,
+    mcp: &HashMap<String, Arc<McpSupervisor>>,
+) -> usize {
+    let mut added = 0;
+    for (name, sup) in mcp {
+        let tools = sup.tools().await;
+        if tools.is_empty() {
+            continue;
+        }
+        let gated = cfg
+            .mcp
+            .get(name)
+            .map(|c| c.gate_in_pentest)
+            .unwrap_or(false);
+        let mut reg = registry.write().await;
+        for desc in &tools {
+            let tool_name = format!("mcp.{}.{}", name, desc.name);
+            if reg.get(&tool_name).is_some() {
+                continue;
+            }
+            match wilai_mcp::convert::descriptor_to_spec_with_gate(name, desc, gated) {
+                Ok(spec) => {
+                    reg.insert_dynamic(spec);
+                    added += 1;
+                }
+                Err(e) => tracing::warn!(server = %name, tool = %desc.name, "skip mcp tool: {e:#}"),
+            }
+        }
+    }
+    if added > 0 {
+        tracing::info!(added, "mcp backfill: new tools registered");
+    }
+    added
+}
+
+/// Background task that calls `backfill_mcp_tools` on a fixed interval.
+/// Catches tools from supervisors that come up late (slow npm install,
+/// transient network, backoff ladder) without requiring a daemon restart.
+pub fn spawn_backfill_task(
+    cfg: Config,
+    registry: Arc<RwLock<Registry>>,
+    mcp: HashMap<String, Arc<McpSupervisor>>,
+    interval_s: u64,
+) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let dur = std::time::Duration::from_secs(interval_s);
+        loop {
+            tokio::time::sleep(dur).await;
+            let _ = backfill_mcp_tools(&cfg, &registry, &mcp).await;
+        }
+    })
 }
 
 pub fn collect_tool_dirs(cfg: &Config) -> Vec<PathBuf> {

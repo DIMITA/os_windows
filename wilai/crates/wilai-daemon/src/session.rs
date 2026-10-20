@@ -82,7 +82,10 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         pending: pending.clone(),
     });
     let mut history: Vec<Message> = Vec::new();
-    let system_prompt = build_system_prompt(&service.registry, service.cfg.general.system_prompt.as_deref());
+    let system_prompt = {
+        let reg = service.registry.read().await;
+        build_system_prompt(&reg, service.cfg.general.system_prompt.as_deref())
+    };
 
     let mut reader = BufReader::new(read_half);
     let mut line = String::new();
@@ -133,8 +136,8 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                     .await;
             }
             ClientOp::ToolsList => {
-                let tools: Vec<crate::protocol::ToolSummary> = service
-                    .registry
+                let reg = service.registry.read().await;
+                let tools: Vec<crate::protocol::ToolSummary> = reg
                     .iter()
                     .map(|(name, spec)| crate::protocol::ToolSummary {
                         name: name.to_string(),
@@ -171,6 +174,17 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                             .await;
                     }
                 }
+            }
+            ClientOp::McpResync => {
+                let added = crate::service::backfill_mcp_tools(
+                    &service.cfg,
+                    &service.registry,
+                    &service.mcp,
+                )
+                .await;
+                tracing::info!(added, "mcp resync");
+                let servers = build_mcp_snapshot(&service).await;
+                let _ = event_tx.send(ServerEvent::McpServers { servers }).await;
             }
             ClientOp::ModeSet { to, trigger } => {
                 let target: Mode = match to.parse() {
@@ -292,11 +306,10 @@ pub async fn run_turn(
         tool_calls: vec![],
     });
 
-    let tool_schemas: Vec<wilai_providers::ToolSchema> = service
-        .registry
-        .iter()
-        .map(|(_, spec)| schema_for(spec))
-        .collect();
+    let tool_schemas: Vec<wilai_providers::ToolSchema> = {
+        let reg = service.registry.read().await;
+        reg.iter().map(|(_, spec)| schema_for(spec)).collect()
+    };
 
     let turn_id = format!("t{}", history.len());
     let mut repair_left = MAX_REPAIR_TURNS;
@@ -461,10 +474,13 @@ async fn execute_call(
     confirmer: &dyn Confirmer,
     confirm_timeout_s: u32,
 ) -> Result<String> {
-    let spec = service
-        .registry
-        .get(&tc.name)
-        .ok_or_else(|| anyhow!("unknown tool: {}", tc.name))?;
+    let spec = {
+        let reg = service.registry.read().await;
+        reg.get(&tc.name)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown tool: {}", tc.name))?
+    };
+    let spec = &spec;
     let mode_now = service.mode.current().await;
 
     let validated = match wilai_tools::validator::validate_args(spec, &tc.arguments) {

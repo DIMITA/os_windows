@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tempfile::TempDir;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use wilai_audit::AuditWriter;
 use wilai_core::{Config, Mode};
 use wilai_daemon::mode_mgr::ModeManager;
@@ -39,6 +39,7 @@ async fn in_process_service() -> (Arc<Service>, TempDir) {
     let cfg = Config::default();
     let registry = wilai_tools::Registry::load_from_dirs(&[tools_dir()], &[]).unwrap();
     assert!(registry.len() > 0, "no YAML tools loaded from {:?}", tools_dir());
+    let registry = Arc::new(RwLock::new(registry));
 
     let mode = ModeManager::new(Mode::Normal, audit_tx.clone());
 
@@ -104,7 +105,10 @@ async fn agent_loop_runs_tool_then_replies() {
     let confirmer = FixedConfirmer(ConfirmAnswer::Yes);
 
     let (tx, rx) = mpsc::channel::<ServerEvent>(32);
-    let system_prompt = build_system_prompt(&service.registry, None);
+    let system_prompt = {
+        let reg = service.registry.read().await;
+        build_system_prompt(&reg, None)
+    };
     let mut history = Vec::new();
 
     run_turn(
@@ -194,7 +198,10 @@ async fn agent_loop_handles_unknown_tool() {
     let confirmer = FixedConfirmer(ConfirmAnswer::No);
 
     let (tx, rx) = mpsc::channel::<ServerEvent>(32);
-    let sys = build_system_prompt(&service.registry, None);
+    let sys = {
+        let reg = service.registry.read().await;
+        build_system_prompt(&reg, None)
+    };
     let mut history = Vec::new();
 
     run_turn(

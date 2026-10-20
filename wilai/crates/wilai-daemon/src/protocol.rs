@@ -29,6 +29,9 @@ pub enum ClientOp {
     /// Trigger an immediate restart of the named MCP server. Replies
     /// with `McpServers` (updated snapshot).
     McpRestart { server: String },
+    /// Scan every live MCP supervisor and insert any tool not yet in the
+    /// registry. Returns `McpServers` with current status.
+    McpResync,
     /// Close the session cleanly.
     Quit,
 }

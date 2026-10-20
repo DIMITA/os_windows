@@ -20,6 +20,11 @@ pub async fn restart(socket: &Path, server: &str) -> Result<()> {
     render(&servers, false)
 }
 
+pub async fn sync(socket: &Path) -> Result<()> {
+    let servers = query(socket, ClientOp::McpResync).await?;
+    render(&servers, false)
+}
+
 async fn query(socket: &Path, op: ClientOp) -> Result<Vec<McpServerInfo>> {
     let stream = UnixStream::connect(socket)
         .await

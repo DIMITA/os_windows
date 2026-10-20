@@ -32,19 +32,30 @@ async fn main() -> Result<()> {
 
     let cfg = wilai_core::Config::load()?;
     let dirs = collect_tool_dirs(&cfg);
-    let mut registry = wilai_tools::Registry::load_from_dirs(&dirs, &cfg.tools.disabled)?;
+    let registry = wilai_tools::Registry::load_from_dirs(&dirs, &cfg.tools.disabled)?;
     tracing::info!(tool_count = registry.len(), "tools loaded");
+    let registry = std::sync::Arc::new(tokio::sync::RwLock::new(registry));
 
     // Bring up MCP servers and merge their tools into the registry under
-    // the `mcp.<server>.<tool>` namespace.
-    let mcp_clients = wilai_daemon::service::init_mcp(&cfg, &mut registry).await;
+    // the `mcp.<server>.<tool>` namespace. Servers that come up late
+    // are picked up by the backfill task below.
+    let mcp_clients = wilai_daemon::service::init_mcp(&cfg, &registry).await;
     if !mcp_clients.is_empty() {
         tracing::info!(
             mcp_servers = mcp_clients.len(),
             "mcp clients spawned (registry now has {} tools)",
-            registry.len()
+            registry.read().await.len()
         );
     }
+
+    // Periodic backfill: catches tools from supervisors that bring their
+    // servers up after the init_mcp grace period expired.
+    let _backfill_handle = wilai_daemon::service::spawn_backfill_task(
+        cfg.clone(),
+        registry.clone(),
+        mcp_clients.clone(),
+        30,
+    );
 
     let (audit, audit_dir) = open_audit(&cfg).await?;
     tracing::info!(dir = %audit_dir.display(), "audit ready");

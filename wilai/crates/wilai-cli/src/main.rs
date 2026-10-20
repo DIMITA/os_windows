@@ -78,6 +78,12 @@ enum McpSub {
         #[arg(long)]
         socket: Option<std::path::PathBuf>,
     },
+    /// Scan all MCP supervisors for tools not yet in the registry and
+    /// insert them. Useful after a server came up late.
+    Sync {
+        #[arg(long)]
+        socket: Option<std::path::PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -239,6 +245,13 @@ async fn main() -> Result<()> {
                     None => wilai_daemon::service::default_socket_path()?,
                 };
                 mcp_cmd::restart(&path, &server).await
+            }
+            McpSub::Sync { socket } => {
+                let path = match socket {
+                    Some(p) => p,
+                    None => wilai_daemon::service::default_socket_path()?,
+                };
+                mcp_cmd::sync(&path).await
             }
         },
     }
