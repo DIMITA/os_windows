@@ -12,6 +12,7 @@ members = [
     "crates/wilai-overlay",
     "crates/wilai-cli",
     "crates/wilai-shell",
+    "crates/wilai-hud",
 ]
 
 [workspace.package]

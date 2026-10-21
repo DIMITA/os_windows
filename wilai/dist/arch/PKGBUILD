@@ -38,8 +38,11 @@ package() {
     install -Dm755 target/release/wilai-shell    "$pkgdir/usr/bin/wilai-shell"
     install -Dm755 target/release/wilai-voice    "$pkgdir/usr/bin/wilai-voice"
     install -Dm755 target/release/wilai-overlay  "$pkgdir/usr/bin/wilai-overlay"
+    install -Dm755 target/release/wilai-hud      "$pkgdir/usr/bin/wilai-hud"
     # Installer helper (bash) — called by sys.install.* YAML tools.
     install -Dm755 scripts/wilai-install         "$pkgdir/usr/bin/wilai-install"
+    # Assets: the robot face used by the HUD overlay.
+    install -Dm644 assets/wilai-face.png         "$pkgdir/usr/share/wilai/assets/wilai-face.png"
 
     # Ship the entire tools/ tree (core/ + pentest/ subdirs).
     install -d "$pkgdir/usr/share/wilai/tools/core"
@@ -50,10 +53,14 @@ package() {
     # Example config and systemd user unit.
     install -Dm644 config/wilai.toml.example \
         "$pkgdir/usr/share/wilai/wilai.toml.example"
+    install -Dm644 dist/hyprland/wilai-hud.conf \
+        "$pkgdir/usr/share/wilai/hyprland/wilai-hud.conf"
     install -Dm644 dist/mcp-examples.toml \
         "$pkgdir/usr/share/wilai/mcp-examples.toml"
     install -Dm644 dist/systemd/wilai.service \
         "$pkgdir/usr/lib/systemd/user/wilai.service"
+    install -Dm644 dist/systemd/wilai-hud.service \
+        "$pkgdir/usr/lib/systemd/user/wilai-hud.service"
 
     # WilOS-Core system units (installed, enabled by the ISO profile).
     install -Dm644 dist/arch/releng-core/airootfs/etc/systemd/system/wilai-daemon.service \

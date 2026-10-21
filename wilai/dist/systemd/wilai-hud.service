@@ -1,0 +1,20 @@
+[Unit]
+Description=Wilai HUD overlay (Wayland layer-shell)
+Documentation=https://github.com/dimita/os_windows
+PartOf=graphical-session.target
+After=graphical-session.target
+After=wilai.service
+Requires=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/wilai-hud --anchor top-right --margin 12
+Restart=on-failure
+RestartSec=2
+# Needs WAYLAND_DISPLAY from the user's session; the user unit runs as
+# the user and inherits the session environment.
+PrivateTmp=true
+NoNewPrivileges=true
+
+[Install]
+WantedBy=graphical-session.target
