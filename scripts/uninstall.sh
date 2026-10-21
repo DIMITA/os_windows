@@ -22,7 +22,7 @@
 #
 # Idempotent: safe to re-run.
 
-set -euo pipefail
+set -eu
 
 is_tty() { [ -t 1 ]; }
 if is_tty; then

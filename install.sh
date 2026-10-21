@@ -23,7 +23,7 @@
 # Idempotent: re-running upgrades Wilai and tops up models without
 # touching your config, state, memory, or audit log.
 
-set -euo pipefail
+set -eu
 
 #─── pretty output ────────────────────────────────────────────────
 is_tty() { [ -t 1 ]; }
@@ -38,7 +38,17 @@ ok()   { printf "${C_GREEN}✓${C_RST} %s\n" "$*"; }
 warn() { printf "${C_YELLOW}!${C_RST} %s\n" "$*" >&2; }
 die()  { printf "${C_RED}✗${C_RST} %s\n" "$*" >&2; exit 1; }
 
-trap 'ec=$?; printf "\n${C_RED}✗${C_RST} install.sh died at line ${LINENO} (exit ${ec}). Scroll up for the last message, or re-run with:\n  curl -fsSL ... | sudo bash -x\n" >&2' ERR
+# POSIX-portable failure trap. ERR is bash-only; using EXIT instead
+# lets us run under /bin/sh (dash on Ubuntu/Debian).
+WILAI_OK=0
+_wilai_cleanup() {
+    rc=$?
+    if [ "$WILAI_OK" != 1 ] && [ "$rc" != 0 ]; then
+        printf "\n%bx%b install.sh exited with code %s. Scroll up for the last message, or re-run with:\n  curl -fsSL ... | sudo sh -x\n" \
+            "$C_RED" "$C_RST" "$rc" >&2
+    fi
+}
+trap _wilai_cleanup EXIT
 
 #─── preflight ────────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || die "run this with sudo:  curl -fsSL … | sudo sh"
@@ -290,6 +300,7 @@ for _ in $(seq 1 10); do
 done
 
 #─── done ────────────────────────────────────────────────────────
+WILAI_OK=1
 cat <<EOF
 
 ${C_GREEN}═══════════════════════════════════════════════════════════${C_RST}
