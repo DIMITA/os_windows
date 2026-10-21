@@ -23,7 +23,8 @@ f2fs-tools
 mtools
 squashfs-tools
 edk2-shell
-gptfdisk       # provides sgdisk
+# provides sgdisk
+gptfdisk
 parted
 
 # Networking
@@ -71,13 +72,14 @@ qemu-guest-agent
 # Local LLM runtime
 ollama
 
-# Voice stack: whisper.cpp + piper + alsa-utils. Ship them so the shell
-# can speak and listen out of the box; the user still has to drop a
-# whisper model + a piper voice under /var/lib/wilai/models/ for them
-# to actually run. The shell probes and reports what's missing.
-whisper.cpp
-piper
-# alsa-utils already included above
+# Voice stack: whisper.cpp (STT) + piper-tts (TTS) are AUR-only, so they
+# cannot ship in the ISO's base package set — mkarchiso only pulls from
+# official Arch repos. The first-boot wizard offers to fetch them via
+# an AUR helper (yay/paru) once the system has network. User still has
+# to drop a whisper model + a piper voice under /var/lib/wilai/models/
+# before [voice] enabled = true actually produces sound. The shell
+# probes and reports what's missing on launch.
+# alsa-utils is already included above.
 
 # Vision stack: grim/scrot for screen capture. The llava model is
 # pulled lazily by `ollama pull llava:7b` when the user first asks
