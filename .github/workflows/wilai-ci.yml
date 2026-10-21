@@ -72,7 +72,7 @@ jobs:
           RUST_BACKTRACE: "1"
 
       - name: List produced binaries
-        run: ls -lh target/debug/wilai target/debug/wilai-daemon target/debug/wilai-voice target/debug/wilai-overlay
+        run: ls -lh target/debug/wilai target/debug/wilai-daemon target/debug/wilai-shell target/debug/wilai-hud target/debug/wilai-voice target/debug/wilai-overlay
 
   # Sanity: the ISO profile references wilai binaries; make sure the
   # release build works and produces the four artifacts a staging step
@@ -99,6 +99,8 @@ jobs:
         run: |
           test -x target/release/wilai
           test -x target/release/wilai-daemon
+          test -x target/release/wilai-shell
+          test -x target/release/wilai-hud
           test -x target/release/wilai-voice
           test -x target/release/wilai-overlay
           ls -lh target/release/wilai*

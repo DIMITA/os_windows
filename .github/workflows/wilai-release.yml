@@ -39,10 +39,12 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - name: Install deb build tools + libxkbcommon
+      - name: Install deb build tools + wayland/xkb dev headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y dpkg-dev fakeroot libxkbcommon-dev
+          sudo apt-get install -y dpkg-dev fakeroot \
+                                  libxkbcommon-dev libwayland-dev libssl-dev \
+                                  pkg-config
 
       - uses: actions/cache@v5
         with:
