@@ -537,10 +537,81 @@ sudo apt purge wilai
 
 ---
 
-## 12. What this mode op does NOT cover
+## 12.5 Building the WilOS live ISO (bonus)
+
+The `distro/` tree is an **archiso** profile — the official Arch
+Linux ISO builder. From an Arch host it's one command; from
+**Ubuntu it's one command inside a Docker/Podman container** that
+runs Arch for you.
+
+### Ubuntu / Debian host — the easy path
+
+```bash
+# Install a container runtime (podman is lighter than docker and
+# doesn't need a daemon).
+sudo apt install -y podman
+
+# From the repo root
+cd ~/wilai-src
+sudo ./scripts/build-iso-docker.sh
+# → ./out/wilos-YYYY.MM.DD-x86_64.iso    (~1.5–2 GB, 20–40 min)
+```
+
+What happens:
+1. Pulls `archlinux:latest` (first run only, ~400 MB).
+2. Inside the container: `pacman -S archiso rustup squashfs-tools`.
+3. Builds Wilai in release mode (your repo is mounted at `/wilos`).
+4. Stages the four binaries (`wilai`, `wilai-daemon`,
+   `wilai-shell`, `wilai-hud`, `wilai-voice`, `wilai-overlay`) +
+   YAML tool catalogue + systemd user units into the airootfs.
+5. Calls `mkarchiso` → writes the ISO to `./out/` on your host.
+
+Flash it to a USB stick:
+
+```bash
+sudo ./scripts/flash-usb.sh ./out/wilos-*.iso /dev/sdX   # replace sdX
+```
+
+Or boot it in VirtualBox: new VM → "Linux / Arch 64-bit" → attach
+the ISO as the optical drive → boot. You'll land in the Hyprland
+live session with Wilai already running.
+
+### Arch host — native path
+
+```bash
+sudo pacman -S archiso imagemagick
+cd ~/wilai-src
+sudo ./scripts/build-iso.sh
+```
+
+Same output, no container, slightly faster (~15–25 min).
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `podman: command not found` | `sudo apt install podman` — or set `RUNTIME=docker` and install docker.io. |
+| `operation not permitted` in container | Docker rootless + loop devices: run with `sudo ./scripts/build-iso-docker.sh`. Podman rootful also works: `sudo RUNTIME=podman ./scripts/build-iso-docker.sh`. |
+| `mkarchiso` fails on squashfs | Low disk — archiso needs ~6 GB free in `/tmp` or the work dir. Pass the output dir on a bigger disk: `./scripts/build-iso-docker.sh /mnt/big/out`. |
+| ISO boots but Wilai is missing | `cargo build --release` failed silently inside the container — scroll up the log for the first red line. |
+
+### Customising before you build
+
+- `distro/packages.x86_64` — Arch package list (add/remove tools).
+- `distro/airootfs/etc/wilai/wilai.toml` — default config shipped
+  on the live ISO.
+- `distro/airootfs/etc/motd` — login banner.
+- `scripts/make-wallpaper.sh` — regenerate the Aurora wallpaper
+  (run once, output goes into `distro/airootfs/usr/share/`).
+
+Commit the changes, re-run the build script, re-flash.
+
+---
+
+## 13. What this mode op does NOT cover
 
 - The ISO install (requires a USB stick or a second VM to receive
-  the install). The build command is in INSTALL.md.
+  the install). The build command is in §12.5 above.
 - The HUD (requires Hyprland or another wlroots compositor — Ubuntu
   default is GNOME, which does not run `wilai-hud` well out of the
   box). Doable with sway in a side session, but out of scope here.

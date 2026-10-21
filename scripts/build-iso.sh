@@ -53,6 +53,8 @@ stage_wilai() {
     local UNIT="$PROFILE/airootfs/usr/lib/systemd/user"
     install -Dm755 "$ROOT/wilai/target/release/wilai"          "$BIN/wilai"
     install -Dm755 "$ROOT/wilai/target/release/wilai-daemon"   "$BIN/wilai-daemon"
+    install -Dm755 "$ROOT/wilai/target/release/wilai-shell"    "$BIN/wilai-shell"
+    install -Dm755 "$ROOT/wilai/target/release/wilai-hud"      "$BIN/wilai-hud"
     install -Dm755 "$ROOT/wilai/target/release/wilai-voice"    "$BIN/wilai-voice"
     install -Dm755 "$ROOT/wilai/target/release/wilai-overlay"  "$BIN/wilai-overlay"
 
@@ -63,12 +65,16 @@ stage_wilai() {
         "$SHARE/wilai.toml.example"
     install -Dm644 "$ROOT/wilai/dist/systemd/wilai.service" \
         "$UNIT/wilai.service"
+    install -Dm644 "$ROOT/wilai/dist/systemd/wilai-hud.service" \
+        "$UNIT/wilai-hud.service"
 
-    # Auto-enable the user unit on the live ISO so a fresh boot has the
-    # daemon ready as soon as Hyprland brings up graphical-session.target.
+    # Auto-enable the user units on the live ISO so a fresh boot has the
+    # daemon + HUD ready as soon as Hyprland brings up graphical-session.
     install -d "$PROFILE/airootfs/etc/skel/.config/systemd/user/graphical-session.target.wants"
     ln -sf "/usr/lib/systemd/user/wilai.service" \
         "$PROFILE/airootfs/etc/skel/.config/systemd/user/graphical-session.target.wants/wilai.service"
+    ln -sf "/usr/lib/systemd/user/wilai-hud.service" \
+        "$PROFILE/airootfs/etc/skel/.config/systemd/user/graphical-session.target.wants/wilai-hud.service"
 
     echo "Wilai staged into airootfs."
 }
