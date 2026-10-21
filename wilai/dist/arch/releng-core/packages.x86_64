@@ -79,6 +79,12 @@ whisper.cpp
 piper
 # alsa-utils already included above
 
+# Vision stack: grim/scrot for screen capture. The llava model is
+# pulled lazily by `ollama pull llava:7b` when the user first asks
+# vision.describe to run (keeps the ISO small).
+grim
+scrot
+
 # Wilai itself (installed from the in-tree PKGBUILD at build time;
 # see customize_airootfs.sh).
 # wilai

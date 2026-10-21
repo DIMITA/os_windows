@@ -1,0 +1,40 @@
+name: screen.capture
+version: 1
+description: Capture a PNG screenshot. Uses grim on Wayland (Hyprland, sway) and scrot on X. The file is written to the system tmpdir and its path returned on stdout. Forbidden in pentest mode — screenshots can leak passwords, 2FA codes, pentest targets.
+category: read
+risk: medium
+
+mode_forbidden: pentest
+
+inputs:
+  output:
+    type: string
+    required: false
+    default: "/tmp/wilai-screen.png"
+    pattern: "^/[a-zA-Z0-9/._\\-]+\\.png$"
+    description: Target PNG path. Must end in .png.
+  region:
+    type: string
+    required: false
+    default: ""
+    pattern: "^$|^[0-9]+,[0-9]+ [0-9]+x[0-9]+$"
+    description: Optional region "X,Y WxH" (grim syntax). Empty = full screen.
+
+guards:
+  - if: "always()"
+    confirm: "Take a screenshot and save to {output}?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-screencap", "{output}", "{region}"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [output, region]
+
+examples:
+  - args: { output: "/tmp/wilai-screen.png" }
+    note: "Full-screen capture."

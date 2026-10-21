@@ -20,6 +20,9 @@ optdepends=(
     'openssh: ssh client used by remote.wilai.* federation tools'
     'socat: unix-socket bridge used by remote.wilai.* federation tools'
     'python: json encoder used by scripts/wilai-remote'
+    'grim: wayland screenshot tool used by screen.capture'
+    'scrot: x11 screenshot tool used by screen.capture (fallback)'
+    'ollama: hosts the llava vision model used by vision.describe'
 )
 makedepends=('rust' 'cargo')
 source=()
@@ -48,6 +51,9 @@ package() {
     install -Dm755 scripts/wilai-selfupdate      "$pkgdir/usr/bin/wilai-selfupdate"
     # Federation helper — called by remote.wilai.* YAML tools.
     install -Dm755 scripts/wilai-remote          "$pkgdir/usr/bin/wilai-remote"
+    # Vision helpers — called by screen.capture and vision.describe.
+    install -Dm755 scripts/wilai-screencap       "$pkgdir/usr/bin/wilai-screencap"
+    install -Dm755 scripts/wilai-vision          "$pkgdir/usr/bin/wilai-vision"
     # Assets: the robot face used by the HUD overlay.
     install -Dm644 assets/wilai-face.png         "$pkgdir/usr/share/wilai/assets/wilai-face.png"
 

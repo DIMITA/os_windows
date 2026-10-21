@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# wilai-screencap — portable PNG capture. Chooses grim on Wayland and
+# scrot on X. Called by screen.capture.
+#
+# Usage: wilai-screencap <output.png> [<X,Y WxH>]
+
+set -euo pipefail
+out="${1:-/tmp/wilai-screen.png}"
+region="${2:-}"
+
+case "${XDG_SESSION_TYPE:-}" in
+    wayland)
+        if ! command -v grim >/dev/null 2>&1; then
+            echo "wilai-screencap: grim not installed (needed on Wayland)" >&2
+            exit 2
+        fi
+        if [[ -n "$region" ]]; then
+            grim -g "$region" "$out"
+        else
+            grim "$out"
+        fi
+        ;;
+    x11|tty|"")
+        if command -v scrot >/dev/null 2>&1; then
+            if [[ -n "$region" ]]; then
+                # scrot uses --select interactively; fall back to full screen
+                # when a region is requested with no interactive session.
+                scrot "$out"
+            else
+                scrot "$out"
+            fi
+        elif command -v maim >/dev/null 2>&1; then
+            maim "$out"
+        else
+            echo "wilai-screencap: no screenshot binary found (scrot/maim)" >&2
+            exit 2
+        fi
+        ;;
+    *)
+        echo "wilai-screencap: unknown session type ${XDG_SESSION_TYPE}" >&2
+        exit 2
+        ;;
+esac
+
+echo "wrote $out ($(stat -c '%s' "$out") bytes)"

@@ -1,0 +1,40 @@
+name: vision.describe
+version: 1
+description: Ask a LOCAL vision-language model (llava via Ollama) to describe an image. The image stays on the machine; the Ollama call is to 127.0.0.1. Forbidden in pentest mode.
+category: read
+risk: low
+
+mode_forbidden: pentest
+
+inputs:
+  image:
+    type: string
+    required: true
+    pattern: "^/[a-zA-Z0-9/._\\-]+\\.(png|jpg|jpeg|webp)$"
+    description: Absolute path to the image file.
+  question:
+    type: string
+    required: false
+    default: "Describe this screenshot in one short paragraph. Mention the application in focus, any visible text, and anything that looks like an error or an alert."
+    description: Prompt to send alongside the image.
+  model:
+    type: string
+    required: false
+    default: "llava:7b"
+    pattern: "^[a-zA-Z0-9._:/-]+$"
+    description: Ollama model tag.
+
+executor:
+  type: subprocess
+  cmd: ["wilai-vision", "{model}", "{image}", "{question}"]
+  timeout_s: 120
+  output:
+    capture: stdout
+    max_bytes: 65536
+
+audit:
+  fields: [image, question, model]
+
+examples:
+  - args: { image: "/tmp/wilai-screen.png" }
+    note: "Describe what's on screen using the local llava model."
