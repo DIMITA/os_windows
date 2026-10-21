@@ -1,0 +1,38 @@
+name: sys.wilai.update
+version: 1
+description: Refresh the pacman databases, upgrade the `wilai` package, and restart the daemon + shell + HUD services so the new binaries are picked up without a reboot.
+category: privileged
+risk: high
+
+inputs:
+  dry_run:
+    type: boolean
+    default: false
+    description: Just check for a new version; do not install.
+  include_hud:
+    type: boolean
+    default: true
+    description: Also restart wilai-hud.service after upgrade.
+
+guards:
+  - if: "arg_true(dry_run)"
+    confirm: "Check for a Wilai update (no changes)?"
+  - if: "not arg_true(dry_run)"
+    confirm: "Pull the latest `wilai` package and restart the daemon? The shell will reconnect automatically."
+
+executor:
+  type: subprocess
+  cmd: ["wilai-selfupdate", "{dry_run}", "{include_hud}"]
+  timeout_s: 600
+  output:
+    capture: both
+    max_bytes: 32768
+
+audit:
+  fields: [dry_run, include_hud]
+
+examples:
+  - args: { dry_run: true }
+    note: "Is there a new Wilai version?"
+  - args: { dry_run: false, include_hud: true }
+    note: "Upgrade and restart everything."

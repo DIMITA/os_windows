@@ -41,6 +41,8 @@ package() {
     install -Dm755 target/release/wilai-hud      "$pkgdir/usr/bin/wilai-hud"
     # Installer helper (bash) — called by sys.install.* YAML tools.
     install -Dm755 scripts/wilai-install         "$pkgdir/usr/bin/wilai-install"
+    # Self-update helper — called by sys.wilai.update.
+    install -Dm755 scripts/wilai-selfupdate      "$pkgdir/usr/bin/wilai-selfupdate"
     # Assets: the robot face used by the HUD overlay.
     install -Dm644 assets/wilai-face.png         "$pkgdir/usr/share/wilai/assets/wilai-face.png"
 

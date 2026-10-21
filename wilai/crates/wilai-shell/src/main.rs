@@ -214,6 +214,16 @@ Keep each step short. Do not run the next step until the previous one \
 succeeded.
 ";
 
+const UPDATE_SEED: &str = "\
+[SELF-UPDATE]
+The user wants to upgrade Wilai itself. Call sys.wilai.update first \
+with dry_run=true to show whether a new version is available. If it \
+is, tell the user the current and candidate versions and ask whether \
+to proceed. On yes, call sys.wilai.update with dry_run=false. The \
+shell will briefly disconnect while the daemon restarts and then \
+reconnect automatically; mention that so the user does not panic.
+";
+
 const INSTALL_SEED: &str = "\
 [INSTALLER]
 The user wants to install WilOS to a disk. You are running from the \
@@ -558,6 +568,13 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
                 app.set_face(FaceState::Thinking);
                 app.busy = true;
                 return Some(KeyAction::SendPrompt(WIZARD_SEED.to_string()));
+            }
+            if text == "/update" {
+                app.push(Who::You, text.clone());
+                app.push(Who::System, "checking for a Wilai update…");
+                app.set_face(FaceState::Thinking);
+                app.busy = true;
+                return Some(KeyAction::SendPrompt(UPDATE_SEED.to_string()));
             }
             app.push(Who::You, text.clone());
             app.set_face(FaceState::Thinking);

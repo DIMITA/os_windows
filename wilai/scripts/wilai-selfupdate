@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# wilai-selfupdate — upgrade the wilai package and restart the services
+# that run its binaries. Called by sys.wilai.update. The shell talks to
+# the daemon over the unix socket, so the shell survives a daemon
+# restart (it just shows a brief "connecting…" and resumes).
+#
+# Usage: wilai-selfupdate <dry_run> <include_hud>
+#   dry_run     ∈ {true,false}   when true, print the candidate version
+#                                  without touching anything
+#   include_hud ∈ {true,false}   when true, also restart wilai-hud
+
+set -euo pipefail
+
+dry_run="${1:-false}"
+include_hud="${2:-true}"
+
+log() { printf 'wilai-selfupdate: %s\n' "$*" >&2; }
+
+if ! command -v pacman >/dev/null 2>&1; then
+    log "pacman not found; this installer only supports Arch-based WilOS."
+    exit 2
+fi
+
+log "refreshing pacman databases"
+pacman -Sy --noconfirm
+
+installed=$(pacman -Q wilai 2>/dev/null | awk '{print $2}')
+candidate=$(pacman -Si wilai 2>/dev/null | awk -F': ' '/^Version/ {print $2; exit}')
+
+if [[ -z "$candidate" ]]; then
+    log "wilai is not in any repo; nothing to compare against"
+    exit 1
+fi
+
+log "installed=${installed:-none}  candidate=${candidate}"
+
+if [[ "$installed" == "$candidate" ]]; then
+    log "already on the latest version; nothing to do"
+    exit 0
+fi
+
+if [[ "$dry_run" == "true" ]]; then
+    log "dry-run: new version ${candidate} is available"
+    exit 0
+fi
+
+log "upgrading wilai to ${candidate}"
+pacman -S --noconfirm wilai
+
+# Restart the daemon last so the shell session doesn't lose the
+# connection before it has heard "upgrading..." back. The shell will
+# auto-reconnect on the fresh daemon.
+if [[ "$include_hud" == "true" ]] && systemctl --user list-unit-files 2>/dev/null \
+    | grep -q '^wilai-hud\.service'; then
+    log "restarting user wilai-hud.service"
+    systemctl --user restart wilai-hud.service || log "hud restart failed; continuing"
+fi
+
+if systemctl list-unit-files 2>/dev/null | grep -q '^wilai-daemon\.service'; then
+    log "restarting system wilai-daemon.service"
+    systemctl restart wilai-daemon.service
+elif systemctl --user list-unit-files 2>/dev/null | grep -q '^wilai\.service'; then
+    log "restarting user wilai.service"
+    systemctl --user restart wilai.service
+else
+    log "no wilai daemon unit found; expect manual restart"
+fi
+
+log "upgrade complete; now running ${candidate}"
