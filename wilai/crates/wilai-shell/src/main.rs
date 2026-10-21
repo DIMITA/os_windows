@@ -80,10 +80,23 @@ struct Cli {
 }
 
 fn default_socket_path() -> PathBuf {
+    // Try the per-user XDG socket first (user-local daemon), then the
+    // system-wide socket paths, in order of likelihood. The .deb's
+    // systemd unit puts the socket under RuntimeDirectory=wilai, so
+    // /run/wilai/wilai.sock exists first; the WilOS-Core profile uses
+    // the flat /run/wilai.sock. Pick the first that exists and is a
+    // socket.
     if let Ok(p) = std::env::var("XDG_RUNTIME_DIR") {
-        return PathBuf::from(p).join("wilai.sock");
+        let p = PathBuf::from(p).join("wilai.sock");
+        if p.exists() { return p; }
     }
-    PathBuf::from("/run/wilai.sock")
+    for candidate in ["/run/wilai/wilai.sock", "/run/wilai.sock"] {
+        let p = PathBuf::from(candidate);
+        if p.exists() { return p; }
+    }
+    // None exist yet — return the deb path by default so the error
+    // message points somewhere useful.
+    PathBuf::from("/run/wilai/wilai.sock")
 }
 
 fn init_logging(filter: &str) {
