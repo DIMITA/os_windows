@@ -1,116 +1,135 @@
-# WilOS Aurora
+# WilOS + Wilai
 
-WilOS is a desktop operating system built on the Linux kernel, an
-Arch base, and a custom **Aurora** shell — glassmorphic, animated,
-GPU-blurred, with macOS-leaning ergonomics (top menu bar, centered
-floating dock, Spotlight launcher, trackpad gestures) and the breadth
-of the Linux ecosystem underneath.
+**WilOS** is a Linux distribution where an on-device AI agent is a first-class
+citizen. **Wilai** is that agent — a typed-tool LLM driver with a
+hash-chained audit log, a local-only lock, and three distinct ways to meet it:
+a boot-to-face live ISO, a `.deb`/pacman package for the Linux box you already
+run, or an SSH drop-shell that lands remote users straight inside the TUI.
 
-This repository contains the **distribution sources**: the archiso
-profile, the shell configuration tree (Hyprland, Waybar, wofi, mako,
-Kitty), the installer, the wallpaper generator, and the helper
-scripts that turn it all into a bootable, installable ISO.
+Everything stays local by default. The LLM runs on-device (Ollama). STT
+(whisper.cpp), TTS (piper), embeddings (nomic), and the llava vision model
+all run on-device. The `security.local_only = true` lock refuses non-local
+providers unconditionally.
 
-## What ships
+## Install (three paths)
 
-- **Linux kernel** (latest stable) with full hardware support: AHCI,
-  NVMe, USB, Wi-Fi, Bluetooth, GPU drivers, audio.
-- **Aurora compositor**: Hyprland with vibrant blur, 16 px rounded
-  corners, ambient shadows, spring-curve animations, gesture-driven
-  workspace switching, tearing-free.
-- **macOS-leaning shell**:
-  - **Top bar** (Waybar) — app menu trigger, workspace dots, current
-    window title, centered live clock, status icons (network, BT,
-    sound, brightness, battery, power).
-  - **Bottom dock** (Waybar instance) — floating glass slab,
-    centered, hover-lift animation, launcher icons + open-app
-    taskbar.
-  - **Spotlight launcher** (wofi) — Super+Space, fuzzy search of
-    apps and files.
-  - **Notifications** (mako) — top-right glass cards.
-- **Apps**: Files (Nautilus), Terminal (Kitty themed), Browser
-  (Firefox), Mail/Calendar/Music/Photos/Calculator, Settings panel.
-- **Login**: greetd + tuigreet, "Welcome to WilOS — Light, made
-  personal."
-- **Installer** (`wilos-install`): guided text installer. Refuses to
-  touch the live disk. Requires the user to type
-  `WIPE <disk>` exactly before any write.
-- **Btrfs root** with `@ / @home / @log / @cache / @snapshots`
-  subvolumes ready for snapper-style snapshots later.
+```bash
+# 1. Boot the ISO (fresh machine / VM / kiosk)
+sudo mkarchiso -v -w /tmp/wilos-core-work -o out wilai/dist/arch/releng-core/
 
-## Quick start
+# 2. Install on an existing box
+#    Arch / Manjaro / EndeavourOS:
+makepkg -si wilai/dist/arch/PKGBUILD
+#    Debian / Ubuntu / Mint:
+./wilai/scripts/build-deb --release && sudo apt install ./wilai/dist/debian/out/wilai_*.deb
 
-### Build the ISO (on an Arch host)
-
-```sh
-sudo pacman -S archiso imagemagick
-sudo ./scripts/build-iso.sh
-# → ISO appears in ./out/wilos-YYYY.MM.DD-x86_64.iso
+# 3. SSH into a Wilai machine
+ssh wilai@my-server     # the `wilai` user's login shell IS wilai-shell
 ```
 
-### Flash to a USB stick
+Full matrix with options, config and troubleshooting: [INSTALL.md](INSTALL.md).
 
-```sh
-sudo ./scripts/flash-usb.sh out/wilos-*.iso /dev/sdX
-```
+## What's in the box
 
-The script refuses anything that looks like an internal disk
-(`sda`, `nvme0n1`, `mmcblk0`) and asks for `FLASH sdX` to be typed.
+### Agent
 
-### Install onto a machine
+- **Daemon** (`wilai-daemon`) — Unix-socket agent with multi-session
+  support, a tamper-evident hash-chained audit log, and per-tool
+  bubblewrap sandboxing. Default provider is a local Ollama; the
+  cloud kill-switch triggers in Pentest mode.
+- **Memory** — SQLite + local embeddings. Facts, notes, session
+  summaries. Compacted periodically so the DB never grows into a
+  Windows-like problem.
+- **MCP** — load any Model Context Protocol server as a tool source
+  via `[mcp.<name>]`. Backfill picks up late-starting servers.
 
-Boot the USB. Open a terminal (Super + Return). Run:
+### Interfaces
 
-```sh
-sudo wilos-install
-```
+- **`wilai-shell`** — full-screen TUI with the animated robot face
+  on the left, chat on the right. Keybinds, voice I/O (F2 push-to-
+  talk), slash commands (`/help`, `/install`, `/update`, `/remotes`,
+  `/wizard`), history recall (Up/Down).
+- **`wilai-hud`** — Wayland layer-shell permanent HUD overlay for
+  Hyprland. Shows the face state (idle, listening, thinking,
+  speaking, acting, alert, offline).
+- **`wilai`** — simple CLI client for one-shot prompts.
+- **`wilai-voice`** — standalone voice bridge (whisper + piper +
+  wake-word).
+- **`wilai-overlay`** — libnotify + zenity bridge for desktops that
+  prefer toasts over a full HUD.
 
-You will be asked for a target disk, hostname, user, password,
-locale, timezone, then to type `WIPE <disk>` to authorise the wipe.
+### Tool catalogue (YAML, confirmed, audited)
+
+- **`sys.*`** — systemd, pacman, NetworkManager, hostname, locale,
+  user, disk, timedate.
+- **`sys.install.*`** — disk layout, pacstrap, genfstab, chroot,
+  bootloader, state migration. The `/install` flow uses these.
+- **`memory.*`** — notes with embedding recall, facts (key/value),
+  session summaries.
+- **`remote.wilai.exec/read`** — SSH-based federation to other Wilai
+  instances. Each remote stays sovereign (its own daemon, audit,
+  confirms).
+- **`screen.capture` / `vision.describe`** — local llava screen
+  description. Forbidden in Pentest mode.
+- **`sys.wilai.update`** — self-update via pacman + unit restart.
+- **`fs.*`, `git.*`, `hyprland.dispatch`** — the day-to-day basics.
+- **Pentest tools** (`nmap`, `nuclei`, `whatweb`, …) in `tools/pentest/`,
+  only loaded in Pentest mode.
+
+### Proactivity
+
+Opt-in `[proactivity]` turns on three watchers:
+
+- **systemd** — reports newly-failed units.
+- **disk** — reports mounts crossing a free-space threshold.
+- **process** — reports a named watchlist process disappearing /
+  returning.
+
+Each nudge is rate-limited by `quota_per_hour` and reflected in the
+HUD (face flips Alert) and the shell (red nudge line).
+
+## Design values
+
+- **Local-only by default**. The daemon refuses non-local providers
+  when `security.local_only = true`, which it is.
+- **Typed tools, not prompt engineering**. Every action a human
+  takes crosses a YAML spec with a confirm guard and an audit entry.
+- **Hash-chained audit**. The log is append-only + SHA-256-chained
+  + Ed25519-signed, with chattr +a applied automatically when the
+  filesystem supports it.
+- **Keep the agent small**. If a feature pulls GTK, Electron, or
+  anything cloud, it does not go in the base. Wilai should not slowly
+  turn into another operating system.
+
+## Status
+
+Current release: **1.0.0**. Snapshot of what landed, in order:
+foundation → audit → tools → MCP → memory → WilOS-Core ISO → voice →
+HUD → installer → proactivity → self-update → federation → vision →
+three install paths (ISO, apt, SSH drop-shell).
+
+See [INSTALL.md](INSTALL.md) and [`wilai/docs/`](wilai/docs/) for
+architecture, tool format, and audit format.
 
 ## Repository layout
 
 ```
-distro/
-  profiledef.sh                archiso profile metadata
-  packages.x86_64              packages installed in the ISO
-  pacman.conf                  build-time pacman config
-  syslinux/                    BIOS boot menu
-  efiboot/                     systemd-boot menu (UEFI)
-  grub/                        GRUB menu
-  airootfs/                    overlay rooted at / in the live system
-    etc/
-      greetd/config.toml         autologin into Hyprland
-      os-release / hostname / motd
-      skel/.config/              user defaults
-        hypr/hyprland.conf       Aurora compositor config
-        waybar/{config,style,dock} top bar + bottom dock
-        wofi/{config,style.css}  Spotlight launcher
-        kitty/kitty.conf         terminal theme
-        mako/config              notifications theme
-      wilos/install-packages.list packages pacstrap installs
-    usr/
-      local/bin/
-        wilos-install            installer (typed-confirmation gate)
-        wilos-firstrun           first login welcome
-      share/backgrounds/wilos/   wallpaper(s)
-
-scripts/
-  build-iso.sh        sudo wrapper around mkarchiso
-  flash-usb.sh        guarded dd-to-USB helper
-  make-wallpaper.sh   generates the Aurora wallpaper
-
-docs/
-  ARCHITECTURE.md     where each component lives, how it fits
-  DESIGN.md           the Aurora visual identity (tokens, motion…)
-  ROADMAP.md          phased plan of features and apps
-  BUILD.md            full build and customisation guide
+wilai/                 — the agent and all its clients (Rust workspace)
+  crates/              — wilai-core, wilai-audit, wilai-tools,
+                         wilai-providers, wilai-mcp, wilai-memory,
+                         wilai-daemon, wilai-cli, wilai-shell,
+                         wilai-hud, wilai-voice, wilai-overlay
+  tools/core/          — YAML tool catalogue (default-loaded)
+  tools/pentest/       — Pentest-only tool catalogue
+  dist/arch/           — PKGBUILD + archiso profile (WilOS-Core)
+  dist/debian/         — control.in + maintainer scripts for apt
+  dist/systemd/        — user systemd units
+  dist/hyprland/       — layerrule snippet for the HUD
+  docs/                — architecture, tool format, audit format
+  scripts/             — build-deb, wilai-install, wilai-remote,
+                         wilai-vision, wilai-screencap, wilai-selfupdate
 ```
 
-## License
-
-Original code, configurations, and assets in this repository are
-released under the MIT license (see `LICENSE`). All Arch Linux
-packages keep their respective upstream licenses. WilOS is an
-independent project and is **not** affiliated with Arch Linux,
-Apple, or Microsoft.
+Hyprland desktop configuration, wallpaper generator, and the macOS-
+leaning Aurora shell are still shipped — see `aurora/`, `hyprland/`,
+`system/`.

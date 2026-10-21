@@ -1,6 +1,6 @@
 # Maintainer: WilOS Aurora <maintainer@wilos.example>
 pkgname=wilai
-pkgver=0.9.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Wilai system agent for WilOS (Aurora desktop + Core headless): typed-tool LLM driver with hash-chained audit"
 arch=('x86_64')

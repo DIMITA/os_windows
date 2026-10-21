@@ -592,6 +592,15 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
                 app.busy = true;
                 return Some(KeyAction::SendPrompt(REMOTES_SEED.to_string()));
             }
+            if text == "/help" || text == "?" {
+                app.remember(&text);
+                app.push(Who::You, text.clone());
+                for line in HELP_TEXT.lines() {
+                    app.push(Who::System, line.to_string());
+                }
+                return None;
+            }
+            app.remember(&text);
             app.push(Who::You, text.clone());
             app.set_face(FaceState::Thinking);
             app.busy = true;
@@ -599,6 +608,23 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
         }
         (KeyCode::Backspace, _) => {
             app.input.pop();
+            None
+        }
+        (KeyCode::Up, _) => {
+            app.history_prev();
+            None
+        }
+        (KeyCode::Down, _) => {
+            app.history_next();
+            None
+        }
+        (KeyCode::Esc, _) if app.history_cursor.is_some() => {
+            app.history_cursor = None;
+            if let Some(saved) = app.input_before_history.take() {
+                app.input = saved;
+            } else {
+                app.input.clear();
+            }
             None
         }
         (KeyCode::Char(ch), _) => {
@@ -616,6 +642,32 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
         _ => None,
     }
 }
+
+const HELP_TEXT: &str = "\
+Wilai shell — slash commands + keybinds
+───────────────────────────────────────
+Slash commands (type at the prompt and hit Enter):
+  /help, ?       show this card
+  /wizard        re-run the first-boot setup (locale, wifi, user, …)
+  /install       install WilOS from the live ISO to a disk
+  /update        check for a Wilai update and apply it
+  /remotes       list federated Wilai instances declared in [remotes]
+
+Keybinds:
+  Enter          send prompt
+  Up / Down      recall previous / newer prompt from history
+  Esc            cancel history recall, restore what you were typing
+  Backspace      delete char
+  PgUp / PgDn    scroll the conversation
+  F2             push-to-talk (voice I/O must be enabled)
+  F3             toggle TTS mute
+  Ctrl+C         quit
+  Ctrl+D         quit (when the input is empty)
+
+Tool catalogue is Wilai's business — just ask in natural language and \
+Wilai picks the right tool, confirming each destructive step. Ask \
+'what tools do you have?' to see the live list.\
+";
 
 async fn dispatch_action(
     action: KeyAction,
