@@ -132,7 +132,9 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm --needed archiso rust cargo git base-devel \
-                                         libxkbcommon squashfs-tools
+                                         libxkbcommon squashfs-tools \
+                                         grub syslinux edk2-shell \
+                                         mtools dosfstools
 
       - uses: actions/checkout@v4
 

@@ -53,6 +53,7 @@ exec "$RUNTIME" run --rm -it \
 set -euo pipefail
 echo ">> Updating pacman + installing build deps..."
 pacman -Syu --noconfirm archiso imagemagick rustup squashfs-tools \
+                        grub syslinux edk2-shell mtools dosfstools \
                         git base-devel >/dev/null
 
 echo ">> Installing Rust stable..."
