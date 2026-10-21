@@ -1,0 +1,18 @@
+[package]
+name = "wilai-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Native Windows launcher for Wilai. Dispatches to a Linux Wilai instance via WSL or SSH. The agent itself lives on Linux; this binary is the client-side pipe."
+
+[[bin]]
+name = "wilai"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+serde.workspace = true
+toml.workspace = true
+dirs.workspace = true

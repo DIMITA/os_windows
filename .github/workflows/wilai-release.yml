@@ -69,6 +69,52 @@ jobs:
             wilai/dist/debian/out/*.sha256
           if-no-files-found: error
 
+  windows-bridge:
+    name: build wilai-bridge .exe (Windows x64)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: wilai
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - name: Install mingw-w64 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mingw-w64
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            wilai/target
+          key: wilai-bridge-win-${{ hashFiles('wilai/Cargo.toml', 'wilai/crates/wilai-bridge/**') }}
+      - name: Cross-compile wilai.exe
+        run: cargo build -p wilai-bridge --release --target x86_64-pc-windows-gnu --locked
+      - name: Stage Windows bridge zip
+        run: |
+          out=dist/windows/out
+          mkdir -p "$out"
+          stage="$out/wilai-windows-bridge"
+          rm -rf "$stage"
+          mkdir -p "$stage"
+          cp target/x86_64-pc-windows-gnu/release/wilai.exe "$stage/"
+          cp dist/windows/wilai.ps1 "$stage/"
+          cp dist/windows/install.ps1 "$stage/"
+          cp dist/windows/README.md  "$stage/README.md"
+          version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          (cd "$out" && zip -r "wilai-windows-bridge-${version}.zip" wilai-windows-bridge/)
+          sha256sum "$out/wilai-windows-bridge-${version}.zip" | tee "$out/wilai-windows-bridge-${version}.zip.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wilai-windows-bridge
+          path: |
+            wilai/dist/windows/out/wilai-windows-bridge-*.zip
+            wilai/dist/windows/out/wilai-windows-bridge-*.zip.sha256
+          if-no-files-found: error
+
   # Build the WilOS-Core ISO inside the official Arch container.
   # Needs root privileges (mksquashfs) so we run as root in the
   # container.
@@ -117,7 +163,7 @@ jobs:
 
   release:
     name: publish GitHub Release
-    needs: [deb, iso]
+    needs: [deb, windows-bridge, iso]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
@@ -126,6 +172,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: wilai-deb
+          path: dist/
+      - name: Download Windows bridge
+        uses: actions/download-artifact@v4
+        with:
+          name: wilai-windows-bridge
           path: dist/
       - name: Download ISO
         uses: actions/download-artifact@v4
@@ -143,5 +194,7 @@ jobs:
           files: |
             dist/*.deb
             dist/*.deb.sha256
+            dist/wilai-windows-bridge-*.zip
+            dist/wilai-windows-bridge-*.zip.sha256
             dist/wilos-core-*.iso
             dist/wilos-core-*.sha256

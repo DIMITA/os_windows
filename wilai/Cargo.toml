@@ -13,6 +13,7 @@ members = [
     "crates/wilai-cli",
     "crates/wilai-shell",
     "crates/wilai-hud",
+    "crates/wilai-bridge",
 ]
 
 [workspace.package]

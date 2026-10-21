@@ -2941,6 +2941,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "wilai-bridge"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "dirs",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "wilai-cli"
 version = "1.0.0"
 dependencies = [

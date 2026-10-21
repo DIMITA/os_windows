@@ -25,13 +25,20 @@ PowerShell -ExecutionPolicy Bypass -File install.ps1
 ```
 
 The installer:
-1. Copies `wilai.ps1` into `%LOCALAPPDATA%\Programs\wilai\`.
-2. Writes a `wilai.cmd` stub so `wilai` works in cmd and PowerShell.
-3. Adds that folder to **your user PATH** (no admin needed).
-4. Asks whether you want WSL or SSH, writes
+1. Installs **`wilai.exe`** (native x64, ~1.3 MB, no runtime deps)
+   into `%LOCALAPPDATA%\Programs\wilai\`. If no `.exe` is next to
+   `install.ps1`, falls back to the `.ps1` launcher + a `wilai.cmd`
+   stub.
+2. Adds that folder to **your user PATH** (no admin needed).
+3. Asks whether you want WSL or SSH, writes
    `%APPDATA%\wilai\config.toml` with sensible defaults.
 
 Open a new terminal; `wilai` is now a command.
+
+The native `wilai.exe` and the `.ps1` launcher behave identically —
+same config file, same `--mode wsl|ssh`, same `--dump-config` and
+`--help`. The `.exe` is just faster to start and does not need
+PowerShell's ExecutionPolicy bypass.
 
 ### Option B — winget (once the manifest is published)
 
@@ -41,7 +48,16 @@ winget install wilos.wilai
 
 ### Option C — manual
 
-Drop `wilai.ps1` wherever you keep your scripts, call it directly:
+Drop `wilai.exe` wherever you keep binaries and call it directly.
+No install step, no PATH change — the exe is self-contained.
+
+```powershell
+.\wilai.exe
+.\wilai.exe --mode ssh
+.\wilai.exe --dump-config
+```
+
+If you only have the `.ps1`:
 
 ```powershell
 PowerShell -ExecutionPolicy Bypass -File .\wilai.ps1

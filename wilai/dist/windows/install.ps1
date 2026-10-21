@@ -65,17 +65,30 @@ if ($Uninstall) {
 Write-Step "install directory: $InstallTo"
 New-Item -ItemType Directory -Force -Path $InstallTo | Out-Null
 
-$src = Join-Path $Here 'wilai.ps1'
-if (-not (Test-Path $src)) {
-    throw "wilai.ps1 not found next to install.ps1 (looked at $src)"
-}
-Copy-Item -Force $src (Join-Path $InstallTo 'wilai.ps1')
+# Prefer the native .exe when it's available next to install.ps1 —
+# that's what the release zip ships. Fall back to the .ps1 launcher
+# otherwise (useful when hacking in-tree).
+$exeSrc = Join-Path $Here 'wilai.exe'
+$ps1Src = Join-Path $Here 'wilai.ps1'
 
-# wilai.cmd stub so `wilai` works in a plain cmd shell too.
-@"
+if (Test-Path $exeSrc) {
+    Write-Step "installing native wilai.exe"
+    Copy-Item -Force $exeSrc (Join-Path $InstallTo 'wilai.exe')
+    # Keep .ps1 beside it for debugging/fallback, don't require it.
+    if (Test-Path $ps1Src) {
+        Copy-Item -Force $ps1Src (Join-Path $InstallTo 'wilai.ps1')
+    }
+} elseif (Test-Path $ps1Src) {
+    Write-Step "installing PowerShell launcher (no wilai.exe found)"
+    Copy-Item -Force $ps1Src (Join-Path $InstallTo 'wilai.ps1')
+    # wilai.cmd stub so `wilai` works in a plain cmd shell too.
+    @"
 @echo off
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0wilai.ps1" %*
 "@ | Set-Content -LiteralPath (Join-Path $InstallTo 'wilai.cmd') -Encoding ASCII
+} else {
+    throw "neither wilai.exe nor wilai.ps1 found next to install.ps1"
+}
 
 if (Add-PathIfMissing $InstallTo) {
     Write-Step "added $InstallTo to your PATH (open a new terminal to pick it up)"
