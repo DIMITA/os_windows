@@ -34,6 +34,21 @@ qemu-system-x86_64 -enable-kvm -m 4G \
     -nic user,model=virtio
 ```
 
+## Voice I/O
+
+The ISO ships `whisper.cpp`, `piper` and `alsa-utils`. To enable voice:
+
+1. Drop a whisper model (e.g. `ggml-base.en.bin`) under
+   `/var/lib/wilai/models/`.
+2. Drop a piper voice (`.onnx` + its `.json`) under the same folder.
+3. In `~/.config/wilai/config.toml`, set `[voice] enabled = true` plus
+   the model filenames (bare names resolve under the models dir).
+4. Launch `wilai-shell`. F2 is push-to-talk, F3 toggles TTS mute.
+
+For a hands-free wake-word, point `wake_cmd` at an external detector
+that writes one line per detection (e.g. `openwakeword`). Each line
+triggers a recording round. The whole stack is local — no network call.
+
 ## Layout
 
 - `profiledef.sh` — archiso build knobs

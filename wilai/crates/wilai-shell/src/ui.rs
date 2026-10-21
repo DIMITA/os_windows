@@ -118,17 +118,30 @@ fn draw_chat(f: &mut Frame<'_>, app: &App, area: Rect) {
 }
 
 fn draw_input(f: &mut Frame<'_>, app: &App, area: Rect) {
-    let hint = if app.pending_confirm.is_some() {
-        " (y)es / (n)o — Esc to cancel "
+    let hint: String = if app.pending_confirm.is_some() {
+        " (y)es / (n)o — Esc to cancel ".to_string()
+    } else if app.recording {
+        " 🎙 listening… release to transcribe ".to_string()
     } else if app.busy {
-        " … working — Esc to interrupt "
+        " … working — Esc to interrupt ".to_string()
     } else {
-        " Enter to send · Ctrl+C to quit · PgUp/PgDn to scroll "
+        let mut h = String::from(" Enter to send · Ctrl+C to quit · PgUp/PgDn to scroll");
+        if app.voice_enabled {
+            if app.voice_can_listen {
+                h.push_str(" · F2 talk");
+            }
+            if app.voice_can_speak {
+                let state = if app.voice_mute { "muted" } else { "on" };
+                h.push_str(&format!(" · F3 tts [{state}]"));
+            }
+        }
+        h.push(' ');
+        h
     };
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(Span::styled(hint, Style::default().fg(Color::DarkGray)));
+        .title(Span::styled(hint.clone(), Style::default().fg(Color::DarkGray)));
     let inner = block.inner(area);
     f.render_widget(block, area);
 

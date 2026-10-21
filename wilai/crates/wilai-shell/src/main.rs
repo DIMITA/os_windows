@@ -5,11 +5,16 @@
 //! chat log, and sends ClientOp::Prompt back when the user hits Enter.
 //! On a WilOS-core system (no desktop) this is the primary interface,
 //! started by a systemd unit at tty1 autologin.
+//!
+//! v3.6 adds local voice I/O: push-to-talk on F2, optional wake-word
+//! via an external command, STT via whisper.cpp, TTS via piper — all
+//! run as subprocesses so this binary carries no audio dependencies.
 
 mod app;
 mod client;
 mod face;
 mod ui;
+mod voice;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -20,15 +25,20 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use std::io::{self, Stdout};
 use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::{mpsc, Mutex};
 use tracing_subscriber::EnvFilter;
+use wilai_core::VoiceConfig;
 use wilai_daemon::protocol::ServerEvent;
 
 use app::{App, PendingConfirm, Who};
 use client::DaemonClient;
 use face::FaceState;
+use voice::VoiceEngine;
 
 #[derive(Parser, Debug)]
 #[command(name = "wilai-shell", version, about = "Wilai TUI shell — Wilai as the primary interface.")]
@@ -45,6 +55,21 @@ struct Cli {
     /// Run the first-boot setup wizard then exit.
     #[arg(long)]
     wizard: bool,
+    /// Enable voice I/O (push-to-talk on F2, TTS of replies).
+    #[arg(long)]
+    voice: bool,
+    /// Override VoiceConfig.whisper_model.
+    #[arg(long)]
+    whisper_model: Option<String>,
+    /// Override VoiceConfig.piper_model.
+    #[arg(long)]
+    piper_model: Option<String>,
+    /// Override VoiceConfig.record_secs.
+    #[arg(long)]
+    record_secs: Option<u32>,
+    /// External wake-word command (reads stdout lines; each line triggers a record).
+    #[arg(long)]
+    wake_cmd: Option<String>,
     /// Logging filter (writes to $XDG_STATE_HOME/wilai/shell.log).
     #[arg(long, default_value = "warn")]
     log: String,
@@ -58,8 +83,6 @@ fn default_socket_path() -> PathBuf {
 }
 
 fn init_logging(filter: &str) {
-    // The shell owns the terminal; we must not log to stderr. Send to
-    // a file instead. Best-effort: silent fallback if we cannot open.
     let Some(mut state) = dirs::state_dir() else { return };
     state.push("wilai");
     let _ = std::fs::create_dir_all(&state);
@@ -74,17 +97,42 @@ fn init_logging(filter: &str) {
         .try_init();
 }
 
+fn resolve_voice_config(cli: &Cli) -> VoiceConfig {
+    let mut cfg = match wilai_core::Config::load() {
+        Ok(c) => c.voice,
+        Err(_) => VoiceConfig::default(),
+    };
+    if cli.voice {
+        cfg.enabled = true;
+    }
+    if let Some(m) = &cli.whisper_model {
+        cfg.whisper_model = m.clone();
+    }
+    if let Some(m) = &cli.piper_model {
+        cfg.piper_model = m.clone();
+    }
+    if let Some(s) = cli.record_secs {
+        cfg.record_secs = s;
+    }
+    if let Some(c) = &cli.wake_cmd {
+        cfg.wake_cmd = c.clone();
+    }
+    cfg
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     init_logging(&cli.log);
 
     let socket = cli.socket.clone().unwrap_or_else(default_socket_path);
+    let voice_cfg = resolve_voice_config(&cli);
+    let voice_engine = if voice_cfg.enabled {
+        Some(VoiceEngine::new(voice_cfg))
+    } else {
+        None
+    };
 
-    // Wizard-pending marker: either --wizard was passed, or the file
-    // /var/lib/wilai/wizard-pending exists (laid down by the ISO
-    // post-install hook). In both cases we seed the first turn with the
-    // setup script so Wilai drives the user through locale/net/user.
     let wizard_seed = if cli.wizard || wizard_pending() {
         Some(WIZARD_SEED.to_string())
     } else {
@@ -98,6 +146,7 @@ async fn main() -> Result<()> {
         cli.model.clone(),
         cli.provider.clone(),
         wizard_seed,
+        voice_engine,
     )
     .await;
     restore_terminal(&mut term)?;
@@ -156,12 +205,25 @@ fn restore_terminal(term: &mut Term) -> Result<()> {
     Ok(())
 }
 
+/// Events that bubble up from the voice tasks (record+transcribe,
+/// wake-word watcher, TTS speak queue).
+#[derive(Debug)]
+enum VoiceEvent {
+    WakeTriggered,
+    ListenStart,
+    Transcribed(String),
+    ListenError(String),
+    SpeakDone,
+    SpeakError(String),
+}
+
 async fn run_app(
     term: &mut Term,
     socket: &std::path::Path,
     model: Option<String>,
     provider: Option<String>,
     wizard_seed: Option<String>,
+    voice: Option<VoiceEngine>,
 ) -> Result<()> {
     let app = Arc::new(Mutex::new(App::new()));
     {
@@ -170,14 +232,22 @@ async fn run_app(
         if wizard_seed.is_some() {
             a.push(Who::System, "first-boot wizard will run on connect.");
         }
+        if let Some(v) = &voice {
+            let probe = v.probe();
+            a.push(Who::System, format!("voice: {}", probe.summary()));
+            a.voice_enabled = true;
+            a.voice_can_listen = v.can_listen();
+            a.voice_can_speak = v.can_speak();
+            if !v.cfg.wake_cmd.is_empty() {
+                a.push(Who::System, format!("wake-cmd: {}", v.cfg.wake_cmd));
+            }
+        }
     }
 
-    // Try to connect; if daemon is not up, keep showing the message and
-    // retry a few times.
     let client = loop_connect(socket, Arc::clone(&app)).await?;
     let client = Arc::new(Mutex::new(client));
 
-    // Auto-send the wizard seed as the first prompt.
+    // Auto-send wizard seed first.
     if let Some(seed) = wizard_seed {
         let mut c = client.lock().await;
         if let Err(e) = c.send_prompt(seed, model.clone(), provider.clone()).await {
@@ -193,8 +263,8 @@ async fn run_app(
         clear_wizard_marker();
     }
 
-    // Spawn the daemon-reader task.
-    let (ev_tx, mut ev_rx) = tokio::sync::mpsc::channel::<ServerEvent>(64);
+    // Daemon reader task.
+    let (ev_tx, mut ev_rx) = mpsc::channel::<ServerEvent>(64);
     let client_r = Arc::clone(&client);
     let reader_task = tokio::spawn(async move {
         loop {
@@ -216,12 +286,10 @@ async fn run_app(
         }
     });
 
-    // Spawn a terminal-events reader.
-    let (key_tx, mut key_rx) = tokio::sync::mpsc::channel::<KeyEvent>(32);
+    // Terminal events task.
+    let (key_tx, mut key_rx) = mpsc::channel::<KeyEvent>(32);
     let key_task = tokio::spawn(async move {
         loop {
-            // crossterm's blocking poll is OK inside spawn_blocking; here
-            // we use the thread approach via tokio::task::spawn_blocking.
             let got = tokio::task::spawn_blocking(|| {
                 if crossterm::event::poll(Duration::from_millis(50)).unwrap_or(false) {
                     match crossterm::event::read() {
@@ -245,7 +313,10 @@ async fn run_app(
         }
     });
 
-    // Draw loop.
+    // Voice tasks: wake-word watcher + TTS speak queue.
+    let (voice_tx, mut voice_rx) = mpsc::channel::<VoiceEvent>(32);
+    let (tts_tx, _tts_task_handle, _wake_task_handle) = spawn_voice_tasks(voice.clone(), voice_tx.clone());
+
     let mut tick_timer = tokio::time::interval(Duration::from_millis(100));
     loop {
         {
@@ -262,33 +333,35 @@ async fn run_app(
                 a.tick_once();
             }
             Some(ev) = ev_rx.recv() => {
+                let text_for_tts = if let ServerEvent::Text { content } = &ev {
+                    Some(content.clone())
+                } else {
+                    None
+                };
                 let mut a = app.lock().await;
                 handle_server_event(&mut a, ev);
+                let muted = a.voice_mute;
+                drop(a);
+                if !muted {
+                    if let (Some(text), Some(tx)) = (text_for_tts, &tts_tx) {
+                        for phrase in VoiceEngine::split_phrases(&text) {
+                            if phrase.trim().len() < 2 {
+                                continue;
+                            }
+                            let _ = tx.send(TtsCommand::Say(phrase)).await;
+                        }
+                    }
+                }
             }
             Some(k) = key_rx.recv() => {
                 let mut a = app.lock().await;
                 if let Some(action) = handle_key(&mut a, k) {
                     drop(a);
-                    match action {
-                        KeyAction::SendPrompt(text) => {
-                            let mut c = client.lock().await;
-                            if let Err(e) = c.send_prompt(text, model.clone(), provider.clone()).await {
-                                let mut a = app.lock().await;
-                                a.push(Who::System, format!("send failed: {e:#}"));
-                            }
-                        }
-                        KeyAction::Confirm { id, yes } => {
-                            let mut c = client.lock().await;
-                            let _ = c.send_confirm(id, yes).await;
-                        }
-                        KeyAction::Quit => {
-                            let mut c = client.lock().await;
-                            let _ = c.send_quit().await;
-                            let mut a = app.lock().await;
-                            a.quit = true;
-                        }
-                    }
+                    dispatch_action(action, &client, &app, &model, &provider, &voice, &voice_tx).await;
                 }
+            }
+            Some(vev) = voice_rx.recv() => {
+                handle_voice_event(vev, &app, &client, &model, &provider, &voice, &voice_tx).await;
             }
         }
     }
@@ -333,10 +406,11 @@ enum KeyAction {
     SendPrompt(String),
     Confirm { id: String, yes: bool },
     Quit,
+    VoiceStart,
+    VoiceToggleMute,
 }
 
 fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
-    // Confirm modal takes priority.
     if let Some(c) = app.pending_confirm.clone() {
         return match k.code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -362,6 +436,20 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
     match (k.code, k.modifiers) {
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Some(KeyAction::Quit),
         (KeyCode::Char('d'), KeyModifiers::CONTROL) if app.input.is_empty() => Some(KeyAction::Quit),
+        (KeyCode::F(2), _) => {
+            if app.voice_enabled && app.voice_can_listen && !app.recording && !app.busy {
+                Some(KeyAction::VoiceStart)
+            } else {
+                None
+            }
+        }
+        (KeyCode::F(3), _) => {
+            if app.voice_enabled {
+                Some(KeyAction::VoiceToggleMute)
+            } else {
+                None
+            }
+        }
         (KeyCode::Enter, _) => {
             let text = app.input.trim().to_string();
             if text.is_empty() {
@@ -391,6 +479,201 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
         }
         _ => None,
     }
+}
+
+async fn dispatch_action(
+    action: KeyAction,
+    client: &Arc<Mutex<DaemonClient>>,
+    app: &Arc<Mutex<App>>,
+    model: &Option<String>,
+    provider: &Option<String>,
+    voice: &Option<VoiceEngine>,
+    voice_tx: &mpsc::Sender<VoiceEvent>,
+) {
+    match action {
+        KeyAction::SendPrompt(text) => {
+            let mut c = client.lock().await;
+            if let Err(e) = c.send_prompt(text, model.clone(), provider.clone()).await {
+                let mut a = app.lock().await;
+                a.push(Who::System, format!("send failed: {e:#}"));
+            }
+        }
+        KeyAction::Confirm { id, yes } => {
+            let mut c = client.lock().await;
+            let _ = c.send_confirm(id, yes).await;
+        }
+        KeyAction::Quit => {
+            let mut c = client.lock().await;
+            let _ = c.send_quit().await;
+            let mut a = app.lock().await;
+            a.quit = true;
+        }
+        KeyAction::VoiceStart => {
+            if let Some(engine) = voice.clone() {
+                let mut a = app.lock().await;
+                a.recording = true;
+                a.set_face(FaceState::Listening);
+                a.push(Who::System, "listening…");
+                drop(a);
+                let tx = voice_tx.clone();
+                tokio::spawn(async move {
+                    let _ = tx.send(VoiceEvent::ListenStart).await;
+                    match engine.record_and_transcribe().await {
+                        Ok(text) => { let _ = tx.send(VoiceEvent::Transcribed(text)).await; }
+                        Err(e) => { let _ = tx.send(VoiceEvent::ListenError(format!("{e:#}"))).await; }
+                    }
+                });
+            }
+        }
+        KeyAction::VoiceToggleMute => {
+            let mut a = app.lock().await;
+            a.voice_mute = !a.voice_mute;
+            let state = if a.voice_mute { "muted" } else { "unmuted" };
+            a.push(Who::System, format!("tts {state}"));
+        }
+    }
+}
+
+async fn handle_voice_event(
+    ev: VoiceEvent,
+    app: &Arc<Mutex<App>>,
+    client: &Arc<Mutex<DaemonClient>>,
+    model: &Option<String>,
+    provider: &Option<String>,
+    voice: &Option<VoiceEngine>,
+    voice_tx: &mpsc::Sender<VoiceEvent>,
+) {
+    match ev {
+        VoiceEvent::WakeTriggered => {
+            let (should_record, engine) = {
+                let a = app.lock().await;
+                let should = a.voice_enabled && a.voice_can_listen && !a.recording && !a.busy;
+                (should, voice.clone())
+            };
+            if should_record {
+                if let Some(engine) = engine {
+                    let mut a = app.lock().await;
+                    a.recording = true;
+                    a.set_face(FaceState::Listening);
+                    a.push(Who::System, "wake-word → listening…");
+                    drop(a);
+                    let tx = voice_tx.clone();
+                    tokio::spawn(async move {
+                        match engine.record_and_transcribe().await {
+                            Ok(text) => { let _ = tx.send(VoiceEvent::Transcribed(text)).await; }
+                            Err(e) => { let _ = tx.send(VoiceEvent::ListenError(format!("{e:#}"))).await; }
+                        }
+                    });
+                }
+            }
+        }
+        VoiceEvent::ListenStart => {}
+        VoiceEvent::Transcribed(text) => {
+            let text = text.trim().to_string();
+            let mut a = app.lock().await;
+            a.recording = false;
+            if text.is_empty() {
+                a.push(Who::System, "(no speech detected)");
+                a.set_face(FaceState::Idle);
+                return;
+            }
+            a.push(Who::You, format!("🎙 {text}"));
+            a.set_face(FaceState::Thinking);
+            a.busy = true;
+            drop(a);
+            let mut c = client.lock().await;
+            if let Err(e) = c.send_prompt(text, model.clone(), provider.clone()).await {
+                let mut a = app.lock().await;
+                a.push(Who::System, format!("send failed: {e:#}"));
+                a.busy = false;
+                a.set_face(FaceState::Alert);
+            }
+        }
+        VoiceEvent::ListenError(msg) => {
+            let mut a = app.lock().await;
+            a.recording = false;
+            a.push(Who::System, format!("listen error: {msg}"));
+            a.set_face(FaceState::Alert);
+        }
+        VoiceEvent::SpeakDone => {}
+        VoiceEvent::SpeakError(msg) => {
+            let mut a = app.lock().await;
+            a.push(Who::System, format!("tts error: {msg}"));
+        }
+    }
+}
+
+#[derive(Debug)]
+enum TtsCommand {
+    Say(String),
+}
+
+/// Spawn the TTS speak queue + optional wake-word watcher. Returns the
+/// TtsCommand sender and the two task join handles.
+fn spawn_voice_tasks(
+    voice: Option<VoiceEngine>,
+    voice_tx: mpsc::Sender<VoiceEvent>,
+) -> (
+    Option<mpsc::Sender<TtsCommand>>,
+    Option<tokio::task::JoinHandle<()>>,
+    Option<tokio::task::JoinHandle<()>>,
+) {
+    let Some(engine) = voice else {
+        return (None, None, None);
+    };
+
+    // TTS speak queue: serialized consumer so phrases play in order.
+    let tts_tx = if engine.can_speak() {
+        let (tx, mut rx) = mpsc::channel::<TtsCommand>(32);
+        let engine_c = engine.clone();
+        let evtx = voice_tx.clone();
+        let h = tokio::spawn(async move {
+            while let Some(cmd) = rx.recv().await {
+                match cmd {
+                    TtsCommand::Say(text) => {
+                        if let Err(e) = engine_c.speak(&text).await {
+                            let _ = evtx.send(VoiceEvent::SpeakError(format!("{e:#}"))).await;
+                        } else {
+                            let _ = evtx.send(VoiceEvent::SpeakDone).await;
+                        }
+                    }
+                }
+            }
+        });
+        drop(h);
+        Some(tx)
+    } else {
+        None
+    };
+
+    // Optional wake-word watcher.
+    let wake_task = if !engine.cfg.wake_cmd.is_empty() {
+        let cmd = engine.cfg.wake_cmd.clone();
+        let evtx = voice_tx.clone();
+        let h = tokio::spawn(async move {
+            let child = Command::new("sh")
+                .arg("-c")
+                .arg(&cmd)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn();
+            let Ok(mut child) = child else { return };
+            let Some(stdout) = child.stdout.take() else { return };
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(_line)) = lines.next_line().await {
+                if evtx.send(VoiceEvent::WakeTriggered).await.is_err() {
+                    break;
+                }
+            }
+            let _ = child.wait().await;
+        });
+        Some(h)
+    } else {
+        None
+    };
+
+    (tts_tx, None, wake_task)
 }
 
 fn handle_server_event(app: &mut App, ev: ServerEvent) {
@@ -446,4 +729,3 @@ fn handle_server_event(app: &mut App, ev: ServerEvent) {
         }
     }
 }
-

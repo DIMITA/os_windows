@@ -49,6 +49,16 @@ pub struct App {
     pub quit: bool,
     pub max_log_lines: usize,
     pub scroll: u16,
+    /// Voice I/O enabled at CLI/config time.
+    pub voice_enabled: bool,
+    /// STT engines + model are present on disk.
+    pub voice_can_listen: bool,
+    /// TTS engines + model are present on disk.
+    pub voice_can_speak: bool,
+    /// User-toggled mute (F3).
+    pub voice_mute: bool,
+    /// A record+transcribe round is in flight.
+    pub recording: bool,
 }
 
 impl App {
@@ -66,6 +76,11 @@ impl App {
             quit: false,
             max_log_lines: 1000,
             scroll: 0,
+            voice_enabled: false,
+            voice_can_listen: false,
+            voice_can_speak: false,
+            voice_mute: false,
+            recording: false,
         }
     }
 

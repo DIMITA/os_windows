@@ -26,6 +26,40 @@ max_size_mb           = 256
 auto_detect = true
 threshold   = 100
 
+[security]
+# Hard-lock to local-only models. When true, non-local providers
+# (anything with local = false) are refused in Normal mode too.
+local_only = true
+
+[persona]
+# How Wilai addresses the user, which voice-model name to use, how
+# proactive it may be (watchers, nudges).
+address        = "Monsieur"
+style          = "concise_butler"
+voice_model    = "en_GB-alan-medium"
+quota_per_hour = 3
+proactivity    = "medium"
+
+[voice]
+# Local voice I/O for wilai-shell. All engines are subprocesses so this
+# section is a no-op if they aren't installed. Set enabled = true (or
+# pass --voice on the CLI) to boot the shell with voice I/O ready.
+enabled       = false
+whisper_bin   = "whisper-cli"
+whisper_model = "ggml-base.en.bin"
+piper_bin     = "piper"
+# Leave piper_model empty to fall back to persona.voice_model + ".onnx".
+piper_model   = ""
+record_bin    = "arecord"
+play_bin      = "aplay"
+sample_rate   = 16000
+record_secs   = 6
+# Optional wake-word command. Each stdout line triggers a recording.
+# Example (openWakeWord):
+#   wake_cmd = "openwakeword --model /var/lib/wilai/models/hey_wil.onnx --emit-on-detect"
+wake_cmd      = ""
+tts_min_chars = 1
+
 # Model Context Protocol servers. Each entry spawns a long-running
 # subprocess at daemon startup and exposes its tools in the Wilai
 # registry under `mcp.<server>.<tool>`. Disable any of them by setting

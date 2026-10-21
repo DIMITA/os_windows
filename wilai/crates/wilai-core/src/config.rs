@@ -21,6 +21,8 @@ pub struct Config {
     pub security: SecurityConfig,
     #[serde(default)]
     pub persona: PersonaConfig,
+    #[serde(default)]
+    pub voice: VoiceConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -76,6 +78,86 @@ impl Default for PersonaConfig {
     }
 }
 
+/// Voice I/O knobs read by wilai-shell. All engines are LOCAL subprocesses
+/// (whisper.cpp for STT, piper for TTS, arecord/aplay for raw audio).
+/// The shell runs them out-of-process so this binary carries no audio
+/// dependencies; missing engines degrade gracefully — the shell falls
+/// back to text and warns.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceConfig {
+    /// When true, wilai-shell boots with voice I/O enabled (equivalent
+    /// to passing --voice on the CLI).
+    #[serde(default)]
+    pub enabled: bool,
+    /// whisper.cpp binary (looked up on PATH if relative).
+    #[serde(default = "default_whisper_bin")]
+    pub whisper_bin: String,
+    /// Path to the whisper.cpp model (.gguf or .bin). Resolved from
+    /// $XDG_DATA_HOME/wilai/models/ when relative.
+    #[serde(default = "default_whisper_model")]
+    pub whisper_model: String,
+    /// piper binary.
+    #[serde(default = "default_piper_bin")]
+    pub piper_bin: String,
+    /// piper voice model (.onnx). Resolved from
+    /// $XDG_DATA_HOME/wilai/models/ when relative. Falls back to
+    /// `persona.voice_model` + ".onnx" if empty.
+    #[serde(default)]
+    pub piper_model: String,
+    /// Recording binary (arecord by default). Receives the args
+    /// `-q -d <secs> -f S16_LE -r <sample_rate> -c 1 <wav>`.
+    #[serde(default = "default_record_bin")]
+    pub record_bin: String,
+    /// Playback binary (aplay by default).
+    #[serde(default = "default_play_bin")]
+    pub play_bin: String,
+    /// Recording sample rate; must match the whisper model's expectation
+    /// (16000 Hz for the standard base/small/medium models).
+    #[serde(default = "default_sample_rate")]
+    pub sample_rate: u32,
+    /// Max seconds per push-to-talk recording. VAD-trim happens inside
+    /// whisper itself; this is the upper bound.
+    #[serde(default = "default_record_secs")]
+    pub record_secs: u32,
+    /// Optional wake-word command. Each line on its stdout triggers a
+    /// recording round. Example:
+    ///   openwakeword --model hey_wil.onnx --emit-on-detect
+    /// Set empty to use push-to-talk only (F2 inside the shell).
+    #[serde(default)]
+    pub wake_cmd: String,
+    /// Minimum chars before TTS speaks a reply. Smaller than this is
+    /// typed-only (silent). 0 means speak everything.
+    #[serde(default = "default_tts_min_chars")]
+    pub tts_min_chars: usize,
+}
+
+fn default_whisper_bin() -> String { "whisper-cli".to_string() }
+fn default_whisper_model() -> String { "ggml-base.en.bin".to_string() }
+fn default_piper_bin() -> String { "piper".to_string() }
+fn default_record_bin() -> String { "arecord".to_string() }
+fn default_play_bin() -> String { "aplay".to_string() }
+fn default_sample_rate() -> u32 { 16000 }
+fn default_record_secs() -> u32 { 6 }
+fn default_tts_min_chars() -> usize { 1 }
+
+impl Default for VoiceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            whisper_bin: default_whisper_bin(),
+            whisper_model: default_whisper_model(),
+            piper_bin: default_piper_bin(),
+            piper_model: String::new(),
+            record_bin: default_record_bin(),
+            play_bin: default_play_bin(),
+            sample_rate: default_sample_rate(),
+            record_secs: default_record_secs(),
+            wake_cmd: String::new(),
+            tts_min_chars: default_tts_min_chars(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Executable to spawn (e.g. "npx", "python", "/path/to/server").
@@ -118,6 +200,7 @@ impl Default for Config {
             mcp: BTreeMap::new(),
             security: SecurityConfig::default(),
             persona: PersonaConfig::default(),
+            voice: VoiceConfig::default(),
         }
     }
 }

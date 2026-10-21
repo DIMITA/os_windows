@@ -68,10 +68,13 @@ qemu-guest-agent
 # Local LLM runtime
 ollama
 
-# Voice stack: whisper.cpp + piper are optional on the ISO. Users
-# install them post-install if they want voice. Leave hooks only.
-# whisper.cpp
-# piper
+# Voice stack: whisper.cpp + piper + alsa-utils. Ship them so the shell
+# can speak and listen out of the box; the user still has to drop a
+# whisper model + a piper voice under /var/lib/wilai/models/ for them
+# to actually run. The shell probes and reports what's missing.
+whisper.cpp
+piper
+# alsa-utils already included above
 
 # Wilai itself (installed from the in-tree PKGBUILD at build time;
 # see customize_airootfs.sh).
