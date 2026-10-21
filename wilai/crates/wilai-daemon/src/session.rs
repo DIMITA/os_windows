@@ -683,6 +683,10 @@ async fn execute_call_with_role(
         run_mcp_tool(service, server, mcp_tool, &validated).await
     } else if spec.name.starts_with("memory.") {
         run_memory_tool(service, &spec.name, &validated).await
+    } else if spec.name.starts_with("pt.") {
+        crate::pentest_tool::run(service, &spec.name, &validated)
+            .await
+            .with_context(|| format!("execute {}", spec.name))
     } else {
         Executor::run(spec, &validated)
             .await

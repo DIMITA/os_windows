@@ -48,7 +48,9 @@ async fn write_op(stream: &mut tokio::net::unix::OwnedWriteHalf, op: &ClientOp) 
 }
 
 async fn wait_for_socket(path: &std::path::Path) -> bool {
-    for _ in 0..40 {
+    // 5s budget. Daemon startup grew with memory/pentest state; be
+    // generous so the test is not flaky under load.
+    for _ in 0..100 {
         if path.exists() && UnixStream::connect(path).await.is_ok() {
             return true;
         }

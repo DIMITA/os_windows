@@ -2,6 +2,7 @@ pub mod detect;
 pub mod ipc;
 pub mod mode_mgr;
 pub mod nudge;
+pub mod pentest_tool;
 pub mod protocol;
 pub mod rbac;
 pub mod service;

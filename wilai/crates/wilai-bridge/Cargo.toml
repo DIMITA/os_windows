@@ -7,7 +7,7 @@ rust-version.workspace = true
 description = "Native Windows launcher for Wilai. Dispatches to a Linux Wilai instance via WSL or SSH. The agent itself lives on Linux; this binary is the client-side pipe."
 
 [[bin]]
-name = "wilai"
+name = "wilai-bridge"
 path = "src/main.rs"
 
 [dependencies]

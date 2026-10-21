@@ -122,6 +122,8 @@ async fn main() -> Result<()> {
         memory,
         embedder,
         nudges: nudge_tx,
+        project: wilai_pentest::project::empty_handle(),
+        project_store: Arc::new(tokio::sync::RwLock::new(None)),
     });
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);

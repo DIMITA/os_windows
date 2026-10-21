@@ -13,3 +13,4 @@ pub use executor::{ExecResult, Executor};
 pub use guards::GuardOutcome;
 pub use registry::Registry;
 pub use spec::{ExecutorSpec, InputSpec, SandboxSpec, ToolSpec};
+pub mod scope;

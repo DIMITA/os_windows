@@ -3002,6 +3002,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "time",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3010,6 +3011,7 @@ dependencies = [
  "wilai-core",
  "wilai-mcp",
  "wilai-memory",
+ "wilai-pentest",
  "wilai-providers",
  "wilai-tools",
 ]
@@ -3081,6 +3083,26 @@ dependencies = [
  "tracing-subscriber",
  "wilai-core",
  "wilai-daemon",
+]
+
+[[package]]
+name = "wilai-pentest"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "time",
+ "tokio",
+ "toml",
+ "tracing",
+ "ulid",
+ "wilai-core",
+ "wilai-tools",
 ]
 
 [[package]]

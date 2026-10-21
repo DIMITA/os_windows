@@ -136,6 +136,23 @@ fn eval_condition(expr: &str, args: &Value) -> Result<bool> {
                 let arg = parts.first().ok_or_else(|| anyhow!("arg_true(name)"))?;
                 Ok(obj.get(*arg).and_then(|v| v.as_bool()).unwrap_or(false))
             }
+            // Pentest-project scope guards. These query the global
+            // scope checker installed by pt.project.start. When no
+            // project is active, the checker returns NotConfigured
+            // and both predicates evaluate to false (pass-through,
+            // preserving the pre-pentest behavior).
+            "scope_denies" => {
+                let arg = parts.first().ok_or_else(|| anyhow!("scope_denies(arg)"))?;
+                let s = obj.get(*arg).and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("missing arg {arg}"))?;
+                Ok(matches!(crate::scope::check(s), crate::scope::ScopeDecision::Deny { .. }))
+            }
+            "scope_requires_ok" => {
+                let arg = parts.first().ok_or_else(|| anyhow!("scope_requires_ok(arg)"))?;
+                let s = obj.get(*arg).and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow!("missing arg {arg}"))?;
+                Ok(matches!(crate::scope::check(s), crate::scope::ScopeDecision::RequireOk { .. }))
+            }
             other => bail!("unknown guard function: {other}"),
         };
     }

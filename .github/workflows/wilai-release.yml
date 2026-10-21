@@ -100,7 +100,10 @@ jobs:
           stage="$out/wilai-windows-bridge"
           rm -rf "$stage"
           mkdir -p "$stage"
-          cp target/x86_64-pc-windows-gnu/release/wilai.exe "$stage/"
+          # The bridge binary ships as wilai.exe to match the user's
+          # expected command name; the cargo target is wilai-bridge
+          # to avoid colliding with wilai-cli's `wilai` on Linux.
+          cp target/x86_64-pc-windows-gnu/release/wilai-bridge.exe "$stage/wilai.exe"
           cp dist/windows/wilai.ps1 "$stage/"
           cp dist/windows/install.ps1 "$stage/"
           cp dist/windows/README.md  "$stage/README.md"

@@ -36,6 +36,11 @@ pub struct Service {
     /// subscribes a receiver and forwards every nudge to its client as
     /// a `ServerEvent::Nudge`.
     pub nudges: tokio::sync::broadcast::Sender<crate::nudge::Nudge>,
+    /// Active pentest project (if any). pt.project.start sets it, pt.project.stop clears it.
+    pub project: wilai_pentest::ProjectHandle,
+    /// Project-local SQLite store (findings, targets). Opened by
+    /// pt.project.start alongside the project.
+    pub project_store: Arc<tokio::sync::RwLock<Option<Arc<wilai_pentest::ProjectStore>>>>,
 }
 
 impl Service {

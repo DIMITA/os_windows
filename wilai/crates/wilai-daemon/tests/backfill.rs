@@ -113,5 +113,7 @@ async fn backfill_registers_tools_after_supervisor_warms_up() {
         memory: None,
         embedder: None,
         nudges: tokio::sync::broadcast::channel(16).0,
+        project: wilai_pentest::project::empty_handle(),
+        project_store: Arc::new(tokio::sync::RwLock::new(None)),
     });
 }

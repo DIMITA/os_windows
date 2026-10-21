@@ -68,7 +68,14 @@ New-Item -ItemType Directory -Force -Path $InstallTo | Out-Null
 # Prefer the native .exe when it's available next to install.ps1 —
 # that's what the release zip ships. Fall back to the .ps1 launcher
 # otherwise (useful when hacking in-tree).
+# The release zip ships the binary as either wilai.exe (preferred
+# user-facing name) or wilai-bridge.exe (crate's cargo target name);
+# install.ps1 accepts both and always lands it as wilai.exe on disk.
 $exeSrc = Join-Path $Here 'wilai.exe'
+if (-not (Test-Path $exeSrc)) {
+    $alt = Join-Path $Here 'wilai-bridge.exe'
+    if (Test-Path $alt) { $exeSrc = $alt }
+}
 $ps1Src = Join-Path $Here 'wilai.ps1'
 
 if (Test-Path $exeSrc) {
