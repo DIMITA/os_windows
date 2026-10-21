@@ -144,6 +144,38 @@ jobs:
         working-directory: wilai
         run: cargo build --workspace --release --locked
 
+      - name: Stage Wilai binaries + tool catalogue into airootfs
+        working-directory: wilai
+        run: |
+          # The ISO's systemd units reference /usr/bin/wilai-daemon and
+          # /usr/bin/wilai-shell. Those binaries do not come from any
+          # Arch package — they are compiled above and must be copied
+          # into airootfs/usr/bin BEFORE mkarchiso packs the squashfs.
+          # Same deal for the YAML tool catalogue under
+          # /usr/share/wilai/tools/.
+          airootfs=dist/arch/releng-core/airootfs
+          install -d "$airootfs/usr/bin" "$airootfs/usr/share/wilai/tools/core" \
+                     "$airootfs/usr/share/wilai/tools/pentest" \
+                     "$airootfs/usr/share/wilai"
+          install -Dm755 target/release/wilai         "$airootfs/usr/bin/wilai"
+          install -Dm755 target/release/wilai-daemon  "$airootfs/usr/bin/wilai-daemon"
+          install -Dm755 target/release/wilai-shell   "$airootfs/usr/bin/wilai-shell"
+          install -Dm755 target/release/wilai-hud     "$airootfs/usr/bin/wilai-hud"
+          install -Dm755 target/release/wilai-voice   "$airootfs/usr/bin/wilai-voice"
+          install -Dm755 target/release/wilai-overlay "$airootfs/usr/bin/wilai-overlay"
+          install -Dm644 tools/core/*.yaml    "$airootfs/usr/share/wilai/tools/core/"
+          install -Dm644 tools/pentest/*.yaml "$airootfs/usr/share/wilai/tools/pentest/"
+          install -Dm644 config/wilai.toml.example \
+                         "$airootfs/usr/share/wilai/wilai.toml.example"
+          # Enable the two services so the ISO comes up with them live.
+          install -d "$airootfs/etc/systemd/system/multi-user.target.wants"
+          ln -sf /etc/systemd/system/wilai-daemon.service \
+                 "$airootfs/etc/systemd/system/multi-user.target.wants/wilai-daemon.service"
+          ln -sf /etc/systemd/system/wilai-shell.service \
+                 "$airootfs/etc/systemd/system/multi-user.target.wants/wilai-shell.service"
+          echo "staged into airootfs:"
+          ls -lh "$airootfs/usr/bin/" "$airootfs/usr/share/wilai/tools/core/" | head -30
+
       - name: mkarchiso wilos-core
         working-directory: wilai
         run: |
