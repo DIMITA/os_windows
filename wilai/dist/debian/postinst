@@ -74,32 +74,50 @@ EOF
             fi
         fi
 
-        # Fresh install only: tell the invoking user how to connect.
-        # The daemon's socket is group-rw for the `wilai` group; local
-        # users have to join that group before `wilai-shell` can talk
-        # to the daemon from their own tty.
+        # Fresh install only: auto-add the invoking user to the wilai
+        # group so they can connect to the socket from their own tty
+        # without any manual command. The user still has to log out +
+        # log back in (or `newgrp wilai`) for the group to take effect
+        # in their current shell session — that one bit cannot be
+        # automated from the postinst.
         if [ -z "$2" ]; then
-            # SUDO_USER is the human who ran `apt install`, if any.
             target="${SUDO_USER:-}"
-            cat <<EOF
+            if [ -n "$target" ] && id "$target" >/dev/null 2>&1; then
+                if ! id -nG "$target" | grep -qw wilai; then
+                    usermod -aG wilai "$target" || true
+                fi
+                cat <<EOF
+
+══════════════════════════════════════════════════════════════════
+  Wilai installed and \`${target}\` added to the \`wilai\` group.
+
+  LAST STEP — pick up the new group in your current session:
+
+      newgrp wilai
+
+  Or just log out and log back in once; after that:
+
+      wilai-shell
+
+  (Models are still downloading in the background; your first
+   prompt waits for the pull if it hasn't finished. Watch with
+   \`journalctl -u wilai-first-models.service -f\`.)
+══════════════════════════════════════════════════════════════════
+EOF
+            else
+                cat <<EOF
 
 ══════════════════════════════════════════════════════════════════
   Wilai installed.
 
-  To use \`wilai-shell\` from your own account, add yourself to
-  the \`wilai\` group once (one-time setup):
+  Add your account to the \`wilai\` group and launch:
 
-      sudo usermod -aG wilai ${target:-\$USER}
-      newgrp wilai        # or log out + log back in
-
-  Then launch:
-
+      sudo usermod -aG wilai \$USER
+      newgrp wilai
       wilai-shell
-
-  (The \`wilai\` system user and anyone remoting in with
-   \`ssh wilai@host\` land straight in the TUI — no group needed.)
 ══════════════════════════════════════════════════════════════════
 EOF
+            fi
         fi
         ;;
 

@@ -192,6 +192,17 @@ for _ in $(seq 1 10); do
     sleep 1
 done
 
+#─── 6. Make sure the invoking user is in the wilai group ────────
+# The .deb postinst already does this via SUDO_USER, but if the
+# installer was launched any other way (ran as root over SSH, piped
+# through sudo with -E flags that drop SUDO_USER, etc.) catch it here.
+if [ -n "${SUDO_USER:-}" ] && id "$SUDO_USER" >/dev/null 2>&1; then
+    if ! id -nG "$SUDO_USER" | grep -qw wilai; then
+        say "Adding $SUDO_USER to the wilai group..."
+        usermod -aG wilai "$SUDO_USER" || true
+    fi
+fi
+
 #─── done ────────────────────────────────────────────────────────
 cat <<EOF
 
