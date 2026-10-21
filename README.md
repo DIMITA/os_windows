@@ -11,23 +11,33 @@ Everything stays local by default. The LLM runs on-device (Ollama). STT
 all run on-device. The `security.local_only = true` lock refuses non-local
 providers unconditionally.
 
-## Install (four paths)
+## Install
+
+**Ubuntu / Debian / Mint / Pop!_OS** — one line, nothing to pre-install:
 
 ```bash
-# 1. Boot the ISO (fresh Linux machine / VM / kiosk)
-sudo mkarchiso -v -w /tmp/wilos-core-work -o out wilai/dist/arch/releng-core/
+curl -fsSL https://raw.githubusercontent.com/dimita/os_windows/main/install.sh | sudo sh
+```
 
-# 2. Install on an existing Linux box
-#    Arch / Manjaro / EndeavourOS:
+The script installs Ollama if missing, drops the prebuilt `.deb`,
+queues the LLM model pulls as a background systemd unit, and
+exits. No Rust toolchain on your machine. ~90 seconds to a
+working `wilai-shell`.
+
+**Other paths:**
+
+```bash
+# Boot the live ISO (fresh machine / VM / kiosk) — build it from Ubuntu:
+sudo ./scripts/build-iso-docker.sh   # output: ./out/wilos-*.iso
+
+# Arch / Manjaro / EndeavourOS:
 makepkg -si wilai/dist/arch/PKGBUILD
-#    Debian / Ubuntu / Mint:
-./wilai/scripts/build-deb --release && sudo apt install ./wilai/dist/debian/out/wilai_*.deb
 
-# 3. From Windows (bridge to a Linux Wilai, WSL or SSH)
-#    PowerShell -ExecutionPolicy Bypass -File wilai\dist\windows\install.ps1
+# From Windows (bridges to a Linux Wilai over WSL or SSH):
+#   PowerShell -ExecutionPolicy Bypass -File wilai\dist\windows\install.ps1
 
-# 4. SSH into a Wilai machine (any OS with an ssh client)
-ssh wilai@my-server     # the `wilai` user's login shell IS wilai-shell
+# SSH into a Wilai machine from any OS with an ssh client:
+ssh wilai@my-server    # the `wilai` user's login shell IS wilai-shell
 ```
 
 Full matrix with options, config and troubleshooting: [INSTALL.md](INSTALL.md).

@@ -37,69 +37,55 @@ Boot the ISO, install Ubuntu with:
   test; LUKS works but adds noise)
 - openssh-server: **yes** (we test the SSH drop-shell later)
 
-After first reboot, from the VM:
-
-```bash
-sudo apt update
-sudo apt install -y git curl build-essential pkg-config \
-                     libxkbcommon-dev networkmanager pipewire \
-                     openssh-server socat python3
-```
+After first reboot, that's it — move on to §2. The installer
+takes care of every dependency; nothing to pre-install.
 
 ---
 
-## 2. Install Rust + Ollama
+## 2. Install Wilai — one command
+
+**No Rust, no manual Ollama pull, no .deb build.** The installer
+grabs the prebuilt .deb from the latest GitHub release, installs
+Ollama if it's missing, queues the model pulls as a background
+systemd unit, and exits.
 
 ```bash
-# Rust (as the normal user, not root)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-source "$HOME/.cargo/env"
-rustc --version   # expect >= 1.75
-
-# Ollama (local LLM runtime, Wilai's default provider)
-curl -fsSL https://ollama.com/install.sh | sh
-sudo systemctl enable --now ollama
-
-# Pull the two models Wilai expects by default.
-ollama pull mistral:7b-instruct     # ~4 GB — this takes a while
-ollama pull nomic-embed-text        # ~250 MB — for memory embeddings
-
-# Sanity check
-ollama list
-ollama run mistral:7b-instruct "hello"
+curl -fsSL https://raw.githubusercontent.com/dimita/os_windows/main/install.sh | sudo sh
 ```
 
-If `ollama run` streams back text, the local LLM half works.
+That's it. Expected timing:
+- Script finishes in ~90 seconds (apt deps + Ollama + .deb).
+- The two models (~4 GB total) finish downloading in the
+  background over the next 10–30 minutes depending on your
+  connection. You can start the shell immediately — your first
+  prompt waits for the pull if it hasn't finished.
 
----
-
-## 3. Build and install Wilai
+Watch the model pulls (optional):
 
 ```bash
-# Clone
-git clone https://github.com/dimita/os_windows.git ~/wilai-src
-cd ~/wilai-src/wilai
-
-# Build + .deb (release, ~5 min on 2 cores)
-sudo apt install -y dpkg-dev fakeroot
-./scripts/build-deb --release
-ls -lh dist/debian/out/wilai_*.deb
-# → wilai_1.0.0_amd64.deb
-
-# Install
-sudo apt install -y ./dist/debian/out/wilai_1.0.0_amd64.deb
-
-# The postinst created the `wilai` system user and enabled
-# wilai-daemon.service. Confirm:
-systemctl status wilai-daemon.service   # expect "active (running)"
-sudo -u wilai ls /var/lib/wilai         # expect audit/ (created lazy)
+journalctl -u wilai-first-models.service -f
 ```
 
-Add your user to the `wilai` group so you can read audit files:
+### Prefer to build from source?
+
+If you want to run from the latest commit instead of the release:
 
 ```bash
-sudo usermod -aG wilai nora   # replace nora with your login
-newgrp wilai                   # pick up the group in this shell
+WILAI_VERSION=main-build \
+curl -fsSL https://raw.githubusercontent.com/dimita/os_windows/main/install.sh | sudo sh
+```
+
+Any `WILAI_VERSION` the installer can't find as a GitHub release
+asset makes it fall back to cloning + building from source
+(installs Rust transparently, ~5 min extra).
+
+### Add your user to the wilai group
+
+So you can read the audit log without sudo:
+
+```bash
+sudo usermod -aG wilai $USER
+newgrp wilai   # pick it up in this shell
 ```
 
 ---
