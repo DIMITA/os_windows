@@ -11,19 +11,22 @@ Everything stays local by default. The LLM runs on-device (Ollama). STT
 all run on-device. The `security.local_only = true` lock refuses non-local
 providers unconditionally.
 
-## Install (three paths)
+## Install (four paths)
 
 ```bash
-# 1. Boot the ISO (fresh machine / VM / kiosk)
+# 1. Boot the ISO (fresh Linux machine / VM / kiosk)
 sudo mkarchiso -v -w /tmp/wilos-core-work -o out wilai/dist/arch/releng-core/
 
-# 2. Install on an existing box
+# 2. Install on an existing Linux box
 #    Arch / Manjaro / EndeavourOS:
 makepkg -si wilai/dist/arch/PKGBUILD
 #    Debian / Ubuntu / Mint:
 ./wilai/scripts/build-deb --release && sudo apt install ./wilai/dist/debian/out/wilai_*.deb
 
-# 3. SSH into a Wilai machine
+# 3. From Windows (bridge to a Linux Wilai, WSL or SSH)
+#    PowerShell -ExecutionPolicy Bypass -File wilai\dist\windows\install.ps1
+
+# 4. SSH into a Wilai machine (any OS with an ssh client)
 ssh wilai@my-server     # the `wilai` user's login shell IS wilai-shell
 ```
 

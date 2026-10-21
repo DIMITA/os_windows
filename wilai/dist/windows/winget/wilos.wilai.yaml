@@ -1,0 +1,44 @@
+# winget manifest skeleton for the Wilai Windows bridge.
+#
+# This is a nested-installer manifest that ships the two .ps1 files
+# plus a small .exe stub (built at release time). Published to
+# winget-pkgs once a release tag is cut.
+#
+# File: manifests/w/wilos/wilai/<version>/wilos.wilai.yaml
+PackageIdentifier: wilos.wilai
+PackageVersion: 1.0.0
+PackageName: Wilai (Windows bridge)
+Publisher: WilOS
+PackageUrl: https://github.com/dimita/os_windows
+License: MIT OR Apache-2.0
+LicenseUrl: https://github.com/dimita/os_windows/blob/main/LICENSE
+ShortDescription: >
+  Windows bridge for Wilai, the local AI agent for Linux. Forwards
+  to a WSL distro or an SSH target where the real daemon runs.
+Description: |
+  Wilai is a typed-tool AI agent that runs on Linux (WilOS,
+  Debian/Ubuntu, Arch). The Windows package is a thin bridge that
+  dispatches to a WSL distro or a remote SSH host where the agent
+  daemon lives. No service, no admin privileges required —
+  install.ps1 drops a PowerShell launcher under
+  %LOCALAPPDATA%\Programs\wilai and adds it to the user PATH.
+Tags:
+  - ai
+  - agent
+  - linux
+  - wsl
+  - ssh
+  - cli
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    InstallerUrl: https://github.com/dimita/os_windows/releases/download/v1.0.0/wilai-windows-bridge-1.0.0.zip
+    InstallerSha256: 0000000000000000000000000000000000000000000000000000000000000000
+    NestedInstallerFiles:
+      - RelativeFilePath: wilai.ps1
+        PortableCommandAlias: wilai-ps1
+      - RelativeFilePath: install.ps1
+        PortableCommandAlias: wilai-install
+ManifestType: singleton
+ManifestVersion: 1.6.0

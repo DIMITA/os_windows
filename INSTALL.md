@@ -1,6 +1,6 @@
 # Installing Wilai
 
-Wilai ships three ways. Pick the one that fits what you already run.
+Wilai ships four ways. Pick the one that fits what you already run.
 
 ## 1. Boot the WilOS ISO (fresh machines, VMs, kiosks)
 
@@ -81,7 +81,36 @@ cp /usr/share/wilai/wilai.toml.example ~/.config/wilai/config.toml
 # Edit [persona], [voice], [proactivity], [remotes] to taste.
 ```
 
-## 3. SSH into a Wilai machine (drop-shell)
+## 3. From Windows (bridge to a Linux Wilai)
+
+Wilai is a Linux agent — the daemon never ran natively on Windows
+and the YAML tool catalogue is Linux-shaped (systemctl, pacman,
+nmcli, …). What runs on Windows is a **bridge**: a small PowerShell
+launcher that forwards your terminal to a Linux Wilai, either in
+WSL or over SSH. No service, no admin.
+
+```powershell
+# From this repo:
+cd wilai\dist\windows
+PowerShell -ExecutionPolicy Bypass -File install.ps1
+# → asks WSL vs SSH, writes %APPDATA%\wilai\config.toml,
+#   drops wilai.ps1 under %LOCALAPPDATA%\Programs\wilai\,
+#   adds it to the user PATH.
+
+wilai                 # open the TUI through the configured bridge
+wilai --mode ssh      # force SSH for this call
+wilai --config        # see the resolved config
+```
+
+- **WSL mode**: a WSL2 distro you already use (Ubuntu, Arch, …) with
+  Wilai installed inside (same `.deb` or PKGBUILD paths as §2).
+- **SSH mode**: a remote Linux box you already run Wilai on, reached
+  through the §4 SSH drop-shell with `wilai@host` as the login user.
+
+Full Windows guide, winget manifest, troubleshooting:
+[`wilai/dist/windows/README.md`](wilai/dist/windows/README.md).
+
+## 4. SSH into a Wilai machine (drop-shell)
 
 Once installed, every Wilai box exposes an SSH drop-shell. The
 `wilai` system user has `/usr/bin/wilai-shell` as its login shell, so
