@@ -40,6 +40,16 @@ voice_model    = "en_GB-alan-medium"
 quota_per_hour = 3
 proactivity    = "medium"
 
+[memory]
+# Keep the local SQLite memory disciplined. A daily task applies three
+# cuts in order: TTL (drop notes older than ttl_days), max rows, soft
+# byte budget. Then VACUUM reclaims disk. Zero disables a cut.
+compact_enabled = true
+ttl_days        = 180
+max_notes       = 10000
+max_bytes       = 134217728   # 128 MiB
+compact_every_h = 24
+
 [proactivity]
 # When enabled, the daemon runs lightweight background watchers and
 # sends ServerEvent::Nudge to connected clients when something crosses

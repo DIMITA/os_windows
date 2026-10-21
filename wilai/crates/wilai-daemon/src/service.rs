@@ -356,3 +356,43 @@ pub async fn open_memory(
         }
     }
 }
+
+/// Daily task that applies the configured compaction policy to the
+/// memory store. Logs a one-line report after each sweep so operators
+/// can see what Wilai pruned. The runtime periodicity + policy knobs
+/// come from [memory] in config.
+pub fn spawn_memory_compact(
+    cfg: wilai_core::MemoryConfig,
+    store: Arc<MemoryStore>,
+) -> tokio::task::JoinHandle<()> {
+    use std::time::Duration;
+    tokio::spawn(async move {
+        let period = Duration::from_secs(cfg.compact_every_h.max(1) as u64 * 3600);
+        // Wait one period before the first pass so a freshly started
+        // daemon doesn't hit the DB immediately. Then loop.
+        tokio::time::sleep(period).await;
+        loop {
+            let policy = wilai_memory::CompactPolicy {
+                ttl_days: cfg.ttl_days,
+                max_notes: cfg.max_notes,
+                max_bytes: cfg.max_bytes,
+            };
+            match store.compact(policy) {
+                Ok(r) if r.total() > 0 => {
+                    tracing::info!(
+                        ttl = r.ttl_deleted,
+                        over_count = r.count_deleted,
+                        over_bytes = r.bytes_deleted,
+                        before = r.before_count,
+                        after = r.after_count,
+                        vacuumed = r.vacuumed,
+                        "memory compacted"
+                    );
+                }
+                Ok(_) => tracing::debug!("memory compact: nothing to prune"),
+                Err(e) => tracing::warn!("memory compact failed: {e:#}"),
+            }
+            tokio::time::sleep(period).await;
+        }
+    })
+}

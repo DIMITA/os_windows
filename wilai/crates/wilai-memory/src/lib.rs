@@ -15,4 +15,4 @@ pub mod embedder;
 pub mod store;
 
 pub use embedder::{Embedder, OllamaEmbedder};
-pub use store::{Fact, MemoryStore, Note, NoteHit, SessionIndex};
+pub use store::{CompactPolicy, CompactReport, Fact, MemoryStore, Note, NoteHit, SessionIndex};

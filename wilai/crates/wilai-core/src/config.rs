@@ -31,6 +31,8 @@ pub struct Config {
     /// instead of asking the LLM to remember hostnames.
     #[serde(default)]
     pub remotes: BTreeMap<String, RemoteConfig>,
+    #[serde(default)]
+    pub memory: MemoryConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -205,6 +207,47 @@ fn default_disk_poll() -> u32 { 60 }
 fn default_disk_threshold() -> u32 { 10 }
 fn default_process_poll() -> u32 { 30 }
 
+/// Memory discipline: Wilai's local SQLite must not grow forever,
+/// otherwise the whole "lean Linux agent" story falls apart. The
+/// compaction task runs daily and applies three cuts in order:
+/// TTL → max row count → max byte budget → VACUUM.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryConfig {
+    /// When true, the daemon spawns a daily compaction task.
+    #[serde(default = "default_true")]
+    pub compact_enabled: bool,
+    /// Drop notes older than this many days. 0 disables the TTL cut.
+    #[serde(default = "default_ttl_days")]
+    pub ttl_days: u32,
+    /// Max rows in the notes table. 0 disables the count cut.
+    #[serde(default = "default_max_notes")]
+    pub max_notes: u64,
+    /// Soft byte budget for the notes table (content + embedding +
+    /// tags). 0 disables the bytes cut. Default 128 MiB.
+    #[serde(default = "default_max_bytes")]
+    pub max_bytes: u64,
+    /// Hours between compaction sweeps. Default 24 h.
+    #[serde(default = "default_compact_every_h")]
+    pub compact_every_h: u32,
+}
+
+fn default_ttl_days() -> u32 { 180 }
+fn default_max_notes() -> u64 { 10_000 }
+fn default_max_bytes() -> u64 { 128 * 1024 * 1024 }
+fn default_compact_every_h() -> u32 { 24 }
+
+impl Default for MemoryConfig {
+    fn default() -> Self {
+        Self {
+            compact_enabled: true,
+            ttl_days: default_ttl_days(),
+            max_notes: default_max_notes(),
+            max_bytes: default_max_bytes(),
+            compact_every_h: default_compact_every_h(),
+        }
+    }
+}
+
 /// SSH endpoint for a federated Wilai instance.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteConfig {
@@ -287,6 +330,7 @@ impl Default for Config {
             voice: VoiceConfig::default(),
             proactivity: ProactivityConfig::default(),
             remotes: BTreeMap::new(),
+            memory: MemoryConfig::default(),
         }
     }
 }

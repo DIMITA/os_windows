@@ -267,6 +267,145 @@ impl MemoryStore {
         let n: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?;
         Ok(n as u64)
     }
+
+    /// Total `notes` row size in bytes, excluding SQLite overhead.
+    /// Used to decide whether to prune.
+    pub fn notes_bytes(&self) -> Result<u64> {
+        let conn = self.conn.lock().unwrap();
+        let n: Option<i64> = conn
+            .query_row(
+                "SELECT COALESCE(SUM(LENGTH(content) + COALESCE(LENGTH(embedding),0) \
+                 + LENGTH(COALESCE(tags,'')) + LENGTH(id)), 0) FROM notes",
+                [],
+                |r| r.get(0),
+            )?;
+        Ok(n.unwrap_or(0) as u64)
+    }
+
+    /// Compaction policy applied once per periodic sweep. Three cuts
+    /// in order:
+    ///   1. drop notes older than `ttl_days` days (if ttl_days > 0)
+    ///   2. if the table still exceeds `max_notes`, drop the oldest
+    ///      excess rows
+    ///   3. if the content byte count still exceeds `max_bytes`, drop
+    ///      the oldest rows until we fit
+    /// Then VACUUM to actually give the pages back to the filesystem.
+    ///
+    /// Returns a `CompactReport` so the caller can log it.
+    pub fn compact(&self, policy: CompactPolicy) -> Result<CompactReport> {
+        let mut report = CompactReport::default();
+        let before_count = self.note_count()?;
+        let before_bytes = self.notes_bytes()?;
+
+        let conn = self.conn.lock().unwrap();
+
+        // 1. TTL cutoff.
+        if policy.ttl_days > 0 {
+            let cutoff = {
+                let now = time::OffsetDateTime::now_utc();
+                let dur = time::Duration::days(policy.ttl_days as i64);
+                let then = now - dur;
+                then.format(&time::format_description::well_known::Rfc3339)?
+            };
+            let n = conn.execute(
+                "DELETE FROM notes WHERE created_at < ?1",
+                params![cutoff],
+            )?;
+            report.ttl_deleted = n as u64;
+        }
+
+        // 2. Max-count cutoff.
+        if policy.max_notes > 0 {
+            let n: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?;
+            if (n as u64) > policy.max_notes {
+                let excess = n as u64 - policy.max_notes;
+                let deleted = conn.execute(
+                    "DELETE FROM notes WHERE id IN (
+                         SELECT id FROM notes ORDER BY created_at ASC LIMIT ?1
+                     )",
+                    params![excess as i64],
+                )?;
+                report.count_deleted = deleted as u64;
+            }
+        }
+
+        // 3. Max-bytes cutoff. Deletes the oldest rows in batches of
+        //    100 until we fit; cap total deletions at 10k to avoid
+        //    spending a long time inside the sqlite mutex.
+        if policy.max_bytes > 0 {
+            let mut budget = 10_000u64;
+            loop {
+                let n: Option<i64> = conn
+                    .query_row(
+                        "SELECT COALESCE(SUM(LENGTH(content) + COALESCE(LENGTH(embedding),0) \
+                         + LENGTH(COALESCE(tags,'')) + LENGTH(id)), 0) FROM notes",
+                        [],
+                        |r| r.get(0),
+                    )?;
+                let bytes = n.unwrap_or(0) as u64;
+                if bytes <= policy.max_bytes || budget == 0 {
+                    break;
+                }
+                let batch = std::cmp::min(100, budget);
+                let deleted = conn.execute(
+                    "DELETE FROM notes WHERE id IN (
+                         SELECT id FROM notes ORDER BY created_at ASC LIMIT ?1
+                     )",
+                    params![batch as i64],
+                )?;
+                if deleted == 0 {
+                    break;
+                }
+                report.bytes_deleted += deleted as u64;
+                budget = budget.saturating_sub(deleted as u64);
+            }
+        }
+
+        // VACUUM reclaims disk. Only run it when we actually deleted
+        // something — vacuum of a quiescent DB is just I/O for nothing.
+        if report.total() > 0 {
+            conn.execute_batch("VACUUM")?;
+            report.vacuumed = true;
+        }
+
+        report.before_count = before_count;
+        report.before_bytes = before_bytes;
+        report.after_count = {
+            let n: i64 = conn.query_row("SELECT COUNT(*) FROM notes", [], |r| r.get(0))?;
+            n as u64
+        };
+        Ok(report)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CompactPolicy {
+    pub ttl_days: u32,
+    pub max_notes: u64,
+    pub max_bytes: u64,
+}
+
+impl Default for CompactPolicy {
+    fn default() -> Self {
+        Self { ttl_days: 180, max_notes: 10_000, max_bytes: 128 * 1024 * 1024 }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CompactReport {
+    pub ttl_deleted: u64,
+    pub count_deleted: u64,
+    pub bytes_deleted: u64,
+    pub before_count: u64,
+    pub after_count: u64,
+    pub before_bytes: u64,
+    pub vacuumed: bool,
+}
+
+impl CompactReport {
+    pub fn total(&self) -> u64 {
+        self.ttl_deleted + self.count_deleted + self.bytes_deleted
+    }
 }
 
 fn iso_now() -> Result<String> {
@@ -329,6 +468,59 @@ mod tests {
         let list = store.fact_list(Some("user.")).unwrap();
         assert_eq!(list.len(), 2);
         assert!(list.iter().any(|f| f.key == "user.name"));
+    }
+
+    #[tokio::test]
+    async fn compact_applies_ttl_count_and_bytes() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let emb = HashEmbedder::new(32);
+        // Seed 20 notes.
+        for i in 0..20 {
+            store
+                .note(Some("s"), &format!("note {i}: content body here"), &[], &emb)
+                .await
+                .unwrap();
+        }
+        assert_eq!(store.note_count().unwrap(), 20);
+
+        // Count cap: keep 5 newest.
+        let r = store.compact(CompactPolicy {
+            ttl_days: 0,
+            max_notes: 5,
+            max_bytes: 0,
+        }).unwrap();
+        assert_eq!(r.count_deleted, 15);
+        assert_eq!(store.note_count().unwrap(), 5);
+        assert!(r.vacuumed);
+
+        // Second pass with no cuts to apply → no-op, no VACUUM.
+        let r2 = store.compact(CompactPolicy {
+            ttl_days: 0,
+            max_notes: 5,
+            max_bytes: 0,
+        }).unwrap();
+        assert_eq!(r2.total(), 0);
+        assert!(!r2.vacuumed);
+    }
+
+    #[tokio::test]
+    async fn compact_bytes_cap_prunes_oldest() {
+        let store = MemoryStore::open_in_memory().unwrap();
+        let emb = HashEmbedder::new(16);
+        for i in 0..50 {
+            store.note(Some("s"), &format!("content {i}"), &[], &emb).await.unwrap();
+        }
+        let total = store.notes_bytes().unwrap();
+        assert!(total > 0);
+        // Cap to a quarter: expect at least a quarter to disappear.
+        let budget = total / 4;
+        let r = store.compact(CompactPolicy {
+            ttl_days: 0,
+            max_notes: 0,
+            max_bytes: budget,
+        }).unwrap();
+        assert!(r.bytes_deleted > 0, "expected some bytes-driven deletions: {r:?}");
+        assert!(store.notes_bytes().unwrap() <= budget, "post-compact bytes exceed budget");
     }
 
     #[test]

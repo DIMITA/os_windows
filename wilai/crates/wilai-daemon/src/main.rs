@@ -83,6 +83,14 @@ async fn main() -> Result<()> {
         None => (None, None),
     };
 
+    // Daily memory compaction. Keeps SQLite from drifting into
+    // Windows-sized state. Skipped when no memory store is open.
+    let _memory_compact_handle = if let Some(m) = &memory {
+        if cfg.memory.compact_enabled {
+            Some(wilai_daemon::service::spawn_memory_compact(cfg.memory.clone(), m.clone()))
+        } else { None }
+    } else { None };
+
     // Proactive-nudge broadcast + quota, consumed by background watchers.
     let (nudge_tx, _nudge_rx) = tokio::sync::broadcast::channel::<wilai_daemon::nudge::Nudge>(64);
     let nudge_quota = std::sync::Arc::new(wilai_daemon::nudge::NudgeQuota::new(
