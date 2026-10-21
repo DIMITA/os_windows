@@ -41,21 +41,26 @@ async fn query(socket: &Path, op: ClientOp) -> Result<Vec<McpServerInfo>> {
     write_half.write_all(&bytes).await?;
     write_half.flush().await?;
 
-    line.clear();
-    reader.read_line(&mut line).await?;
-    let ev: ServerEvent =
-        serde_json::from_str(line.trim()).with_context(|| format!("parse: {line}"))?;
+    let servers = loop {
+        line.clear();
+        reader.read_line(&mut line).await?;
+        let ev: ServerEvent = serde_json::from_str(line.trim())
+            .with_context(|| format!("parse: {line}"))?;
+        match ev {
+            ServerEvent::McpServers { servers } => break servers,
+            // Nudges may arrive asynchronously; skip and keep reading.
+            ServerEvent::Nudge { .. } => continue,
+            ServerEvent::Error { message } => return Err(anyhow!("daemon: {message}")),
+            other => return Err(anyhow!("unexpected event: {other:?}")),
+        }
+    };
 
     let quit = ClientOp::Quit;
     let mut b = serde_json::to_vec(&quit)?;
     b.push(b'\n');
     let _ = write_half.write_all(&b).await;
 
-    match ev {
-        ServerEvent::McpServers { servers } => Ok(servers),
-        ServerEvent::Error { message } => Err(anyhow!("daemon: {message}")),
-        other => Err(anyhow!("unexpected event: {other:?}")),
-    }
+    Ok(servers)
 }
 
 fn render(servers: &[McpServerInfo], json: bool) -> Result<()> {

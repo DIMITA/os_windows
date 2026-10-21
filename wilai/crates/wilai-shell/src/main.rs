@@ -825,6 +825,19 @@ fn handle_server_event(app: &mut App, ev: ServerEvent) {
             app.push(Who::System, format!("new tools: {}", names.join(", ")));
         }
         ServerEvent::McpServers { .. } => {}
+        ServerEvent::Nudge { kind, severity, message, .. } => {
+            let who = Who::Nudge;
+            let prefix = match severity.as_str() {
+                "alert" => "⚠",
+                "warn"  => "!",
+                _       => "·",
+            };
+            app.push(who, format!("{prefix} [{kind}] {message}"));
+            app.set_face(match severity.as_str() {
+                "alert" => FaceState::Alert,
+                _ => app.face,
+            });
+        }
         ServerEvent::Bye => {
             app.push(Who::System, "daemon closed the session.");
             app.set_face(FaceState::Offline);

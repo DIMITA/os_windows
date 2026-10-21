@@ -78,6 +78,15 @@ pub enum EntryPayload {
     SystemChainResume { recovered_hash: String },
     SystemChattrApplied { file: String },
     SystemChattrUnavailable { fs: String },
+    /// Proactive nudge emitted by a daemon watcher. Captured here so
+    /// the hash chain reflects the daemon's unprompted output alongside
+    /// user-driven tool runs.
+    Nudge {
+        kind: String,
+        severity: String,
+        message: String,
+        context: Value,
+    },
 }
 
 impl EntryPayload {
@@ -98,6 +107,7 @@ impl EntryPayload {
             EntryPayload::SystemChainResume { .. } => "system.chain_resume",
             EntryPayload::SystemChattrApplied { .. } => "system.chattr_applied",
             EntryPayload::SystemChattrUnavailable { .. } => "system.chattr_unavailable",
+            EntryPayload::Nudge { .. } => "nudge",
         }
     }
 
@@ -187,6 +197,12 @@ impl EntryPayload {
             }),
             EntryPayload::SystemChattrApplied { file } => serde_json::json!({ "file": file }),
             EntryPayload::SystemChattrUnavailable { fs } => serde_json::json!({ "fs": fs }),
+            EntryPayload::Nudge { kind, severity, message, context } => serde_json::json!({
+                "kind": kind,
+                "severity": severity,
+                "message": message,
+                "context": context,
+            }),
         }
     }
 }

@@ -83,6 +83,14 @@ async fn drive(stream: UnixStream, state: &Arc<SharedFaceState>) -> Result<()> {
             ServerEvent::Mode { current, .. } if current == "pentest" => {
                 state.set(FaceState::Alert);
             }
+            ServerEvent::Nudge { severity, .. } => {
+                // Flip to Alert on alert-severity nudges; info/warn leave
+                // the current state alone so the user can finish what
+                // they were doing.
+                if severity == "alert" {
+                    state.set(FaceState::Alert);
+                }
+            }
             ServerEvent::Bye => {
                 state.set(FaceState::Offline);
                 break;

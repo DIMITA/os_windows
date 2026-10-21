@@ -303,6 +303,9 @@ async fn run_daemon_turn(socket: &Path, prompt: &str) -> Result<Vec<String>> {
             ServerEvent::Tools { .. } => {}
             ServerEvent::ToolsAdded { .. } => {}
             ServerEvent::McpServers { .. } => {}
+            ServerEvent::Nudge { severity, message, .. } => {
+                eprintln!("[nudge/{severity}] {message}");
+            }
         }
     }
 

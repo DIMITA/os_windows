@@ -153,6 +153,10 @@ async fn drive_session(cli: &Cli, socket: &Path, prompt: &str) -> Result<()> {
                 notify(cli, "Wilai tools", &format!("+{} new", names.len()), "low").await;
             }
             ServerEvent::McpServers { .. } => {}
+            ServerEvent::Nudge { kind, severity, message, .. } => {
+                let urgency = if severity == "alert" { "critical" } else if severity == "warn" { "normal" } else { "low" };
+                notify(cli, &format!("Wilai nudge · {kind}"), &message, urgency).await;
+            }
         }
     }
 

@@ -16,6 +16,7 @@ pub enum Who {
     Wilai,
     Tool,
     System,
+    Nudge,
 }
 
 impl Who {
@@ -25,6 +26,7 @@ impl Who {
             Who::Wilai => "wilai",
             Who::Tool => "tool ",
             Who::System => "sys  ",
+            Who::Nudge => "nudge",
         }
     }
 }

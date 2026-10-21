@@ -80,6 +80,14 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         service.registry.clone(),
         event_tx.clone(),
     );
+    // Subscribe to proactive nudges and forward them as ServerEvent::Nudge.
+    spawn_nudge_relay(
+        service.nudges.subscribe(),
+        service.audit_tx.clone(),
+        session_id.clone(),
+        service.mode.current().await,
+        event_tx.clone(),
+    );
 
     // Reader loop: parse client ops; for ConfirmAnswer, deliver via pending; for
     // Prompt, run the agent loop; for Quit, break.
@@ -847,6 +855,51 @@ fn spawn_mode_relay(
                 .await
                 .is_err()
             {
+                break;
+            }
+        }
+    });
+}
+
+fn spawn_nudge_relay(
+    mut rx: tokio::sync::broadcast::Receiver<crate::nudge::Nudge>,
+    audit_tx: mpsc::Sender<WriteRequest>,
+    session: String,
+    mode: Mode,
+    event_tx: mpsc::Sender<ServerEvent>,
+) {
+    tokio::spawn(async move {
+        loop {
+            let n = match rx.recv().await {
+                Ok(n) => n,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    tracing::debug!(skipped, "nudge relay lagged");
+                    continue;
+                }
+                Err(_) => break,
+            };
+            // Audit the emission so the hash chain reflects the
+            // daemon's proactive output just like it does for tool runs.
+            let _ = audit_tx
+                .send(WriteRequest {
+                    session: session.clone(),
+                    mode,
+                    payload: EntryPayload::Nudge {
+                        kind: n.kind.clone(),
+                        severity: n.severity.as_str().to_string(),
+                        message: n.message.clone(),
+                        context: n.context.clone(),
+                    },
+                })
+                .await;
+            let ev = ServerEvent::Nudge {
+                id: n.id.clone(),
+                kind: n.kind.clone(),
+                severity: n.severity.as_str().to_string(),
+                message: n.message.clone(),
+                context: n.context.clone(),
+            };
+            if event_tx.send(ev).await.is_err() {
                 break;
             }
         }

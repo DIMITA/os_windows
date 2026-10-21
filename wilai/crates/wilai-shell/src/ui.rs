@@ -86,6 +86,7 @@ fn draw_chat(f: &mut Frame<'_>, app: &App, area: Rect) {
             Who::Wilai => (Color::Cyan, true),
             Who::Tool => (Color::Yellow, false),
             Who::System => (Color::DarkGray, false),
+            Who::Nudge => (Color::LightRed, true),
         };
         let tag_style = Style::default().fg(color).add_modifier(if bold {
             Modifier::BOLD

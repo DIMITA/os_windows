@@ -112,5 +112,6 @@ async fn backfill_registers_tools_after_supervisor_warms_up() {
         tools_changed: Arc::new(tokio::sync::Notify::new()),
         memory: None,
         embedder: None,
+        nudges: tokio::sync::broadcast::channel(16).0,
     });
 }

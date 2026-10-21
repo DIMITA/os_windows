@@ -83,6 +83,24 @@ async fn main() -> Result<()> {
         None => (None, None),
     };
 
+    // Proactive-nudge broadcast + quota, consumed by background watchers.
+    let (nudge_tx, _nudge_rx) = tokio::sync::broadcast::channel::<wilai_daemon::nudge::Nudge>(64);
+    let nudge_quota = std::sync::Arc::new(wilai_daemon::nudge::NudgeQuota::new(
+        cfg.proactivity.quota_per_hour,
+    ));
+    let _watcher_handles = wilai_daemon::watchers::spawn_all(
+        cfg.proactivity.clone(),
+        nudge_tx.clone(),
+        nudge_quota.clone(),
+    );
+    if cfg.proactivity.enabled {
+        tracing::info!(
+            quota = cfg.proactivity.quota_per_hour,
+            "proactivity enabled; {} watcher(s) running",
+            _watcher_handles.len()
+        );
+    }
+
     let service = Arc::new(Service {
         cfg: cfg.clone(),
         registry,
@@ -95,6 +113,7 @@ async fn main() -> Result<()> {
         tools_changed,
         memory,
         embedder,
+        nudges: nudge_tx,
     });
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);

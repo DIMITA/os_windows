@@ -87,6 +87,16 @@ pub enum ServerEvent {
     McpServers { servers: Vec<McpServerInfo> },
     /// Final event before the connection closes.
     Bye,
+    /// Proactive signal emitted by a daemon-side watcher (systemd,
+    /// disk, process). Not tied to a user turn; may arrive at any time.
+    Nudge {
+        id: String,
+        kind: String,
+        severity: String,
+        message: String,
+        #[serde(default)]
+        context: Value,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -55,6 +55,7 @@ async fn in_process_service() -> (Arc<Service>, TempDir) {
         tools_changed: Arc::new(tokio::sync::Notify::new()),
         memory: None,
         embedder: None,
+        nudges: tokio::sync::broadcast::channel(16).0,
     });
     (service, tmp)
 }

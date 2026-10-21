@@ -161,6 +161,9 @@ where
                 eprintln!("[tools] registered: {}", names.join(", "));
             }
             ServerEvent::McpServers { .. } => {}
+            ServerEvent::Nudge { kind, severity, message, .. } => {
+                eprintln!("[nudge/{severity}] {kind}: {message}");
+            }
         }
     }
 }

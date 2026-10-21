@@ -32,6 +32,10 @@ pub struct Service {
     /// Embedder for memory.note / memory.recall. Implementations:
     /// OllamaEmbedder in production, HashEmbedder in tests.
     pub embedder: Option<Arc<dyn Embedder>>,
+    /// Broadcast channel for proactive nudges. Each session loop
+    /// subscribes a receiver and forwards every nudge to its client as
+    /// a `ServerEvent::Nudge`.
+    pub nudges: tokio::sync::broadcast::Sender<crate::nudge::Nudge>,
 }
 
 impl Service {

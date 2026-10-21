@@ -40,6 +40,20 @@ voice_model    = "en_GB-alan-medium"
 quota_per_hour = 3
 proactivity    = "medium"
 
+[proactivity]
+# When enabled, the daemon runs lightweight background watchers and
+# sends ServerEvent::Nudge to connected clients when something crosses
+# a threshold (a service fails, a disk fills up, a watched process
+# disappears). The quota caps the firehose: ≤N nudges per rolling hour.
+enabled           = false
+quota_per_hour    = 6
+systemd_poll_s    = 30
+disk_poll_s       = 60
+disk_threshold_pct = 10
+watch_mounts      = ["/"]
+watch_processes   = []
+process_poll_s    = 30
+
 [voice]
 # Local voice I/O for wilai-shell. All engines are subprocesses so this
 # section is a no-op if they aren't installed. Set enabled = true (or

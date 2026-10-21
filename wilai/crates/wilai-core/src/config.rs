@@ -23,6 +23,8 @@ pub struct Config {
     pub persona: PersonaConfig,
     #[serde(default)]
     pub voice: VoiceConfig,
+    #[serde(default)]
+    pub proactivity: ProactivityConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -158,6 +160,60 @@ impl Default for VoiceConfig {
     }
 }
 
+/// Proactivity knobs. When enabled, the daemon runs lightweight
+/// background watchers (systemd units, disk free space, named
+/// processes) and emits `ServerEvent::Nudge` to connected clients when
+/// something crosses a threshold. The quota prevents flooding.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProactivityConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    /// Max nudges emitted per rolling hour across all watchers. 0
+    /// means "no proactive nudges". Falls back to persona.quota_per_hour
+    /// when 0 and persona.quota_per_hour > 0.
+    #[serde(default = "default_nudge_quota")]
+    pub quota_per_hour: u32,
+    /// Interval between systemd-failed polls, seconds.
+    #[serde(default = "default_systemd_poll")]
+    pub systemd_poll_s: u32,
+    /// Interval between disk-free polls, seconds.
+    #[serde(default = "default_disk_poll")]
+    pub disk_poll_s: u32,
+    /// Nudge when free space on a watched mount drops below this percent.
+    #[serde(default = "default_disk_threshold")]
+    pub disk_threshold_pct: u32,
+    /// Mountpoints to watch (absolute paths). Default ["/"] when empty.
+    #[serde(default)]
+    pub watch_mounts: Vec<String>,
+    /// Process names whose disappearance warrants a nudge.
+    #[serde(default)]
+    pub watch_processes: Vec<String>,
+    /// Interval between process-watchlist polls, seconds.
+    #[serde(default = "default_process_poll")]
+    pub process_poll_s: u32,
+}
+
+fn default_nudge_quota() -> u32 { 6 }
+fn default_systemd_poll() -> u32 { 30 }
+fn default_disk_poll() -> u32 { 60 }
+fn default_disk_threshold() -> u32 { 10 }
+fn default_process_poll() -> u32 { 30 }
+
+impl Default for ProactivityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            quota_per_hour: default_nudge_quota(),
+            systemd_poll_s: default_systemd_poll(),
+            disk_poll_s: default_disk_poll(),
+            disk_threshold_pct: default_disk_threshold(),
+            watch_mounts: vec![],
+            watch_processes: vec![],
+            process_poll_s: default_process_poll(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpServerConfig {
     /// Executable to spawn (e.g. "npx", "python", "/path/to/server").
@@ -201,6 +257,7 @@ impl Default for Config {
             security: SecurityConfig::default(),
             persona: PersonaConfig::default(),
             voice: VoiceConfig::default(),
+            proactivity: ProactivityConfig::default(),
         }
     }
 }
