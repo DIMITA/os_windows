@@ -83,36 +83,52 @@ else
     REL_API="https://api.github.com/repos/${REPO}/releases/latest"
 fi
 
-say "Fetching latest Wilai release..."
-DEB_URL=$(curl -fsSL "$REL_API" \
-    | python3 -c "
-import json, sys, re
-rel = json.load(sys.stdin)
+say "Looking for a prebuilt Wilai release..."
+# Fetch the releases API without -f so a 404 doesn't blow up curl;
+# write the HTTP code separately and only parse JSON on a 200.
+REL_JSON=$(mktemp)
+HTTP=$(curl -sS -o "$REL_JSON" -w "%{http_code}" "$REL_API" || echo 000)
+DEB_URL=""
+if [ "$HTTP" = 200 ]; then
+    DEB_URL=$(python3 -c "
+import json, re
+with open('$REL_JSON') as f: rel = json.load(f)
 for a in rel.get('assets', []):
     if re.search(r'wilai_.*_${ARCH}\.deb\$', a['name']):
         print(a['browser_download_url']); break
-" || true)
+" 2>/dev/null || true)
+fi
+rm -f "$REL_JSON"
 
 if [ -z "$DEB_URL" ]; then
-    warn "no prebuilt .deb for ${ARCH} on this release."
-    warn "falling back to building from source — this needs ~5 min and 2 GB RAM."
+    if [ "$HTTP" = 404 ]; then
+        warn "no tagged release on GitHub yet — falling back to source build."
+    else
+        warn "no prebuilt .deb for ${ARCH} on this release (HTTP $HTTP) — building from source."
+    fi
+    warn "source build needs ~5 min + ~2 GB RAM."
     FALLBACK_SOURCE=1
 else
     FALLBACK_SOURCE=0
 fi
 
 if [ "$FALLBACK_SOURCE" = 1 ]; then
-    apt-get install -y -qq git build-essential pkg-config dpkg-dev fakeroot >/dev/null
+    say "Installing build dependencies..."
+    apt-get install -y -qq \
+        git build-essential pkg-config dpkg-dev fakeroot \
+        libxkbcommon-dev libwayland-dev libssl-dev \
+        >/dev/null
     if ! command -v cargo >/dev/null 2>&1; then
-        say "Installing Rust (one-time)..."
+        say "Installing Rust (one-time, ~1 min)..."
         curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs \
             | sh -s -- -y --default-toolchain stable --profile minimal >/dev/null
-        export PATH="$HOME/.cargo/bin:$PATH"
+        export PATH="/root/.cargo/bin:$PATH"
     fi
     SRC=$(mktemp -d)
+    say "Cloning repo + building (grab a coffee)..."
     git clone --depth 1 "https://github.com/${REPO}.git" "$SRC" >/dev/null 2>&1
     cd "$SRC/wilai"
-    ./scripts/build-deb --release >/dev/null
+    ./scripts/build-deb --release
     DEB=$(ls dist/debian/out/wilai_*_${ARCH}.deb | head -1)
 else
     say "Downloading $(basename "$DEB_URL")..."
