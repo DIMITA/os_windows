@@ -283,7 +283,31 @@ pub async fn open_audit(cfg: &Config) -> Result<(AuditWriter, PathBuf)> {
         }
     };
 
-    let writer = AuditWriter::open_with_signer(&dir, signer)
+    // Optional at-rest encryption key for rotated audit files. The
+    // hot file stays plain; rotated ones get ChaCha20-Poly1305'd.
+    let enc_key = if cfg.security.audit_encrypt_rotated {
+        let path = if cfg.security.audit_key_file.is_empty() {
+            dir.join("audit-key")
+        } else {
+            PathBuf::from(&cfg.security.audit_key_file)
+        };
+        match wilai_audit::encrypt::load_or_create_key(&path) {
+            Ok(k) => {
+                tracing::info!(key_file = %path.display(), "audit rotation encryption on");
+                Some(k)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "audit rotation encryption requested but key load failed: {e:#}; staying plain"
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let writer = AuditWriter::open_full(&dir, signer, enc_key)
         .with_context(|| format!("open audit dir {}", dir.display()))?;
     Ok((writer, dir))
 }

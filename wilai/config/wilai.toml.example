@@ -31,6 +31,17 @@ threshold   = 100
 # (anything with local = false) are refused in Normal mode too.
 local_only = true
 
+# At-rest encryption for ROTATED audit files. The current (hot) file
+# stays plaintext so the hash-chain writer can append + verify. On
+# day rollover the previous file is ChaCha20-Poly1305'd to
+# <name>.enc and the plaintext removed. Use this for sensitive hosts
+# where backups of /var/lib/wilai leak outside the machine; for the
+# live state DB, run /var/lib/wilai on LUKS or fscrypt instead.
+audit_encrypt_rotated = false
+# Where the 32-byte key lives (hex-encoded, mode 0600). Auto-created
+# on first use. Empty = $audit_dir/audit-key.
+audit_key_file = ""
+
 [persona]
 # How Wilai addresses the user, which voice-model name to use, how
 # proactive it may be (watchers, nudges).

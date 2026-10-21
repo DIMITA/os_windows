@@ -25,6 +25,11 @@ pub struct AuditWriter {
     running_hash: String,
     seq: u64,
     signer: Option<crate::sign::AuditSigner>,
+    /// When set, rotated files are encrypted to `<name>.enc` and the
+    /// plaintext is removed. The hot file (the one we are currently
+    /// appending to) is always plain, otherwise the chain writer
+    /// can't append+fsync efficiently.
+    encrypt_key: Option<[u8; crate::encrypt::KEY_SIZE]>,
 }
 
 impl AuditWriter {
@@ -35,6 +40,14 @@ impl AuditWriter {
     pub fn open_with_signer(
         dir: &Path,
         signer: Option<crate::sign::AuditSigner>,
+    ) -> Result<Self> {
+        Self::open_full(dir, signer, None)
+    }
+
+    pub fn open_full(
+        dir: &Path,
+        signer: Option<crate::sign::AuditSigner>,
+        encrypt_key: Option<[u8; crate::encrypt::KEY_SIZE]>,
     ) -> Result<Self> {
         std::fs::create_dir_all(dir)
             .with_context(|| format!("create audit dir {}", dir.display()))?;
@@ -54,6 +67,7 @@ impl AuditWriter {
                 running_hash,
                 seq: last_seq + 1,
                 signer,
+                encrypt_key,
             }
         } else {
             let head = ChainHead::load(&head_path)?;
@@ -72,6 +86,7 @@ impl AuditWriter {
                 running_hash: running,
                 seq: 0,
                 signer,
+                encrypt_key,
             }
         };
 
@@ -117,6 +132,31 @@ impl AuditWriter {
 
         let prev_path = self.dir.join(&prev_file);
         chattr_append_only(&prev_path);
+
+        // Opportunistic encryption of the rotated file. We never fail
+        // the rotation on encryption trouble — operators would rather
+        // have a plaintext rotated file than no rotation at all. The
+        // failure is logged.
+        if let Some(key) = &self.encrypt_key {
+            let enc_path = self.dir.join(format!("{prev_file}.enc"));
+            match crate::encrypt::encrypt_file(&prev_path, &enc_path, key) {
+                Ok(()) => {
+                    if let Err(e) = std::fs::remove_file(&prev_path) {
+                        tracing::warn!(
+                            "encrypted {} but could not remove plaintext: {e}",
+                            prev_path.display()
+                        );
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        "encryption of rotated {} failed: {e:#}; keeping plaintext",
+                        prev_path.display()
+                    );
+                    let _ = std::fs::remove_file(&enc_path);
+                }
+            }
+        }
 
         let new_path = self.dir.join(new_name);
         self.file = OpenOptions::new()

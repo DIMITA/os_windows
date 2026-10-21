@@ -1,4 +1,5 @@
 pub mod chain;
+pub mod encrypt;
 pub mod entry;
 pub mod sign;
 pub mod writer;
