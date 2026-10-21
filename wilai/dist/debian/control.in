@@ -1,0 +1,31 @@
+Package: wilai
+Version: @VERSION@
+Section: admin
+Priority: optional
+Architecture: @ARCH@
+Maintainer: WilOS <maintainer@wilos.example>
+Homepage: https://github.com/dimita/os_windows
+Depends: libc6, libxkbcommon0, systemd
+Recommends: ollama | ollama-cuda, networkmanager, pipewire, pipewire-pulse, alsa-utils, openssh-server, socat, python3, curl
+Suggests: whisper-cpp, piper-tts, libnotify-bin, zenity, grim, scrot, nmap, nuclei, whatweb
+Description: Wilai — local, auditable system agent (AI shell for Linux)
+ Wilai is an on-device AI agent that drives a Linux system through
+ typed, YAML-declared tools. Every tool call is confirmed and recorded
+ in a tamper-evident hash-chained audit log. The default LLM provider
+ is a local Ollama instance; the security.local_only lock refuses any
+ non-local provider.
+ .
+ This package installs:
+   * wilai-daemon — the long-running agent service (system unit)
+   * wilai-shell  — full-screen TUI frontend (tty + SSH drop-shell)
+   * wilai-hud    — Wayland layer-shell HUD overlay (user unit)
+   * wilai        — command-line client
+   * wilai-voice, wilai-overlay — optional voice + desktop toasts
+   * sys.* / memory.* / remote.* / vision.* YAML tool catalogue
+ .
+ Three ways to use Wilai after install:
+   1. Run `wilai` from your terminal.
+   2. SSH into the machine as the `wilai` user — you drop directly
+      into the TUI (its login shell is wilai-shell).
+   3. On Hyprland (or any wlroots compositor), enable the
+      wilai-hud.service user unit for a permanent face HUD.

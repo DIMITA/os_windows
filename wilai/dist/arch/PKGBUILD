@@ -25,6 +25,7 @@ optdepends=(
     'ollama: hosts the llava vision model used by vision.describe'
 )
 makedepends=('rust' 'cargo')
+install=wilai.install
 source=()
 sha256sums=()
 

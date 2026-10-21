@@ -1,0 +1,28 @@
+[Unit]
+Description=Wilai system agent daemon
+Documentation=https://github.com/dimita/os_windows
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=wilai
+Group=wilai
+ExecStart=/usr/bin/wilai-daemon --log info --socket /run/wilai/wilai.sock
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=wilai
+RuntimeDirectoryMode=0750
+StateDirectory=wilai
+StateDirectoryMode=0750
+# Local-only lock is enforced in-process; the system hardening below
+# still applies.
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=false
+
+[Install]
+WantedBy=multi-user.target

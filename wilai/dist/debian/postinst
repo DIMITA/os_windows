@@ -1,0 +1,87 @@
+#!/bin/sh
+# wilai .deb post-install hook.
+# Creates the system `wilai` user (used by the SSH drop-shell), lays
+# the state dir, and enables the system daemon by default. We never
+# auto-start the HUD user unit — that is a per-user decision.
+
+set -e
+
+case "$1" in
+    configure)
+        # System user for SSH drop-shell. Its login shell is
+        # wilai-shell: ssh wilai@host → straight into Wilai.
+        if ! id -u wilai >/dev/null 2>&1; then
+            adduser --system --group --home /var/lib/wilai \
+                --shell /usr/bin/wilai-shell --gecos "Wilai agent" \
+                --disabled-password wilai
+        fi
+
+        # State + models dir, group-readable so the user can drop in
+        # whisper/piper models themselves if they do not want to run
+        # as root.
+        install -d -m 0750 -o wilai -g wilai /var/lib/wilai
+        install -d -m 0755 -o wilai -g wilai /var/lib/wilai/models
+        if [ ! -f /var/lib/wilai/models/README ]; then
+            cat > /var/lib/wilai/models/README <<'EOF'
+Drop a whisper.cpp model (e.g. ggml-base.en.bin) and a piper voice
+(.onnx + .json) here, then set [voice] enabled = true in
+~/.config/wilai/config.toml. Models stay on this machine; whisper
+runs via whisper-cli, piper via piper, both as subprocesses.
+EOF
+            chown wilai:wilai /var/lib/wilai/models/README
+        fi
+
+        # Reload systemd and enable the daemon on fresh installs. On
+        # upgrades, restart the running unit so the new binaries get
+        # picked up. (`systemctl restart` on an inactive unit is a
+        # no-op.)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+            if [ -z "$2" ]; then
+                # Fresh install.
+                systemctl enable --now wilai-daemon.service || true
+            else
+                # Upgrade: restart to pick up the new binaries.
+                systemctl try-restart wilai-daemon.service || true
+            fi
+        fi
+
+        # If sshd is installed, drop in a hint comment telling the
+        # admin how to allow the `wilai` user to log in. We do NOT
+        # edit sshd_config ourselves.
+        if [ -f /etc/ssh/sshd_config ] && ! grep -q 'wilai drop-shell' \
+            /etc/ssh/sshd_config.d/50-wilai.conf 2>/dev/null; then
+            if [ -d /etc/ssh/sshd_config.d ]; then
+                cat > /etc/ssh/sshd_config.d/50-wilai.conf <<'EOF'
+# wilai drop-shell: the `wilai` system user has /usr/bin/wilai-shell
+# as its login shell. Drop a client public key into
+# /var/lib/wilai/.ssh/authorized_keys and connect with
+#   ssh wilai@<host>
+# to land directly in Wilai's TUI. If this is a shared machine, keep
+# PasswordAuthentication no and rely on keys only.
+Match User wilai
+    AcceptEnv LANG LC_* COLORTERM TERM
+    AllowAgentForwarding no
+    AllowTcpForwarding no
+    X11Forwarding no
+    PermitTTY yes
+EOF
+                chmod 0644 /etc/ssh/sshd_config.d/50-wilai.conf
+                # Try to reload sshd; harmless if not running.
+                systemctl reload ssh 2>/dev/null \
+                    || systemctl reload sshd 2>/dev/null \
+                    || true
+            fi
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# scripts/build-deb — build a single wilai_<version>_<arch>.deb from the
+# workspace. Expects a Debian/Ubuntu host (or an Arch host with the
+# `debian-tools` wrapper) with: cargo, rustc, dpkg-deb, fakeroot.
+#
+# Output: ./dist/debian/out/wilai_<version>_<arch>.deb
+#
+# Usage: scripts/build-deb [--release | --debug]
+set -euo pipefail
+
+mode="${1:-release}"
+case "$mode" in
+    release|--release) mode=release ;;
+    debug|--debug) mode=debug ;;
+    *) echo "usage: $0 [--release|--debug]" >&2; exit 2 ;;
+esac
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+arch=$(dpkg --print-architecture 2>/dev/null || echo amd64)
+pkg="wilai_${version}_${arch}"
+work="$ROOT/dist/debian/out/$pkg"
+out="$ROOT/dist/debian/out"
+
+echo ">> building wilai $version ($mode) for $arch"
+if [ "$mode" = release ]; then
+    cargo build --release --workspace
+    bindir="$ROOT/target/release"
+else
+    cargo build --workspace
+    bindir="$ROOT/target/debug"
+fi
+
+echo ">> staging $pkg"
+rm -rf "$work"
+mkdir -p \
+    "$work/DEBIAN" \
+    "$work/usr/bin" \
+    "$work/usr/lib/systemd/system" \
+    "$work/usr/lib/systemd/user" \
+    "$work/usr/share/wilai/tools/core" \
+    "$work/usr/share/wilai/tools/pentest" \
+    "$work/usr/share/wilai/assets" \
+    "$work/usr/share/wilai/hyprland" \
+    "$work/usr/share/wilai/scripts" \
+    "$work/usr/share/doc/wilai"
+
+install -Dm755 "$bindir/wilai"          "$work/usr/bin/wilai"
+install -Dm755 "$bindir/wilai-daemon"   "$work/usr/bin/wilai-daemon"
+install -Dm755 "$bindir/wilai-shell"    "$work/usr/bin/wilai-shell"
+install -Dm755 "$bindir/wilai-voice"    "$work/usr/bin/wilai-voice"
+install -Dm755 "$bindir/wilai-overlay"  "$work/usr/bin/wilai-overlay"
+install -Dm755 "$bindir/wilai-hud"      "$work/usr/bin/wilai-hud"
+install -Dm755 scripts/wilai-install    "$work/usr/bin/wilai-install"
+install -Dm755 scripts/wilai-selfupdate "$work/usr/bin/wilai-selfupdate"
+install -Dm755 scripts/wilai-remote     "$work/usr/bin/wilai-remote"
+install -Dm755 scripts/wilai-screencap  "$work/usr/bin/wilai-screencap"
+install -Dm755 scripts/wilai-vision     "$work/usr/bin/wilai-vision"
+
+install -Dm644 dist/debian/wilai-daemon.service \
+    "$work/usr/lib/systemd/system/wilai-daemon.service"
+install -Dm644 dist/systemd/wilai-hud.service \
+    "$work/usr/lib/systemd/user/wilai-hud.service"
+install -Dm644 dist/systemd/wilai.service \
+    "$work/usr/lib/systemd/user/wilai.service"
+
+cp tools/core/*.yaml    "$work/usr/share/wilai/tools/core/"
+cp tools/pentest/*.yaml "$work/usr/share/wilai/tools/pentest/"
+install -Dm644 assets/wilai-face.png     "$work/usr/share/wilai/assets/wilai-face.png"
+install -Dm644 dist/hyprland/wilai-hud.conf \
+    "$work/usr/share/wilai/hyprland/wilai-hud.conf"
+install -Dm644 config/wilai.toml.example \
+    "$work/usr/share/wilai/wilai.toml.example"
+install -Dm644 README.md       "$work/usr/share/doc/wilai/README.md"
+
+# Maintainer scripts.
+install -Dm755 dist/debian/postinst "$work/DEBIAN/postinst"
+install -Dm755 dist/debian/prerm    "$work/DEBIAN/prerm"
+install -Dm755 dist/debian/postrm   "$work/DEBIAN/postrm"
+
+# Control file (substitute version + arch).
+sed -e "s/@VERSION@/$version/" -e "s/@ARCH@/$arch/" \
+    dist/debian/control.in > "$work/DEBIAN/control"
+
+echo ">> dpkg-deb --build"
+if command -v fakeroot >/dev/null 2>&1; then
+    fakeroot dpkg-deb --build --root-owner-group "$work" "$out/$pkg.deb"
+else
+    dpkg-deb --build --root-owner-group "$work" "$out/$pkg.deb"
+fi
+
+rm -rf "$work"
+echo "done: $out/$pkg.deb"
+ls -lh "$out/$pkg.deb"

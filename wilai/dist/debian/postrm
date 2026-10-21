@@ -1,0 +1,31 @@
+#!/bin/sh
+# wilai .deb post-remove hook. On purge, remove the service user and
+# the state dir. On plain remove, we leave both alone so the user does
+# not lose their audit history or local memory DB.
+set -e
+
+case "$1" in
+    purge)
+        if id -u wilai >/dev/null 2>&1; then
+            deluser --quiet wilai 2>/dev/null || true
+        fi
+        rm -rf /var/lib/wilai
+        rm -f /etc/ssh/sshd_config.d/50-wilai.conf
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        if [ -d /run/systemd/system ]; then
+            systemctl daemon-reload || true
+        fi
+        ;;
+
+    *)
+        echo "postrm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

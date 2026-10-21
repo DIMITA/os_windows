@@ -1,0 +1,22 @@
+#!/bin/sh
+# wilai .deb pre-remove hook. Stop services cleanly before the
+# binaries disappear.
+set -e
+
+case "$1" in
+    remove|upgrade|deconfigure)
+        if [ -d /run/systemd/system ]; then
+            systemctl --no-reload disable --now wilai-daemon.service 2>/dev/null || true
+        fi
+        ;;
+
+    failed-upgrade)
+        ;;
+
+    *)
+        echo "prerm called with unknown argument '$1'" >&2
+        exit 1
+        ;;
+esac
+
+exit 0

@@ -1,0 +1,70 @@
+## wilai.install — pacman hooks that match the .deb postinst semantics.
+## Creates the `wilai` system user whose login shell is wilai-shell,
+## sets up the state dir, drops a sshd_config.d snippet (if sshd is
+## installed), and enables wilai-daemon on fresh installs.
+
+post_install() {
+    _wilai_user_setup
+    _wilai_sshd_snippet
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+        systemctl enable --now wilai-daemon.service 2>/dev/null || true
+    fi
+    cat <<'MSG'
+==> Wilai installed.
+    * `wilai` or `wilai-shell` from any shell.
+    * `ssh wilai@<host>` drops into the TUI (its login shell is wilai-shell).
+      Drop your public key into /var/lib/wilai/.ssh/authorized_keys first.
+    * On Hyprland, enable the wilai-hud user unit:
+          systemctl --user enable --now wilai-hud.service
+    * Config at /usr/share/wilai/wilai.toml.example → ~/.config/wilai/config.toml
+MSG
+}
+
+post_upgrade() {
+    _wilai_user_setup
+    _wilai_sshd_snippet
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+        systemctl try-restart wilai-daemon.service || true
+    fi
+}
+
+pre_remove() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl --no-reload disable --now wilai-daemon.service 2>/dev/null || true
+    fi
+}
+
+_wilai_user_setup() {
+    if ! id -u wilai >/dev/null 2>&1; then
+        useradd --system --home /var/lib/wilai --shell /usr/bin/wilai-shell \
+            --comment "Wilai agent" --user-group wilai || true
+    else
+        # Make sure the shell is up to date in case someone changed it.
+        usermod -s /usr/bin/wilai-shell wilai || true
+    fi
+    install -d -m 0750 -o wilai -g wilai /var/lib/wilai
+    install -d -m 0755 -o wilai -g wilai /var/lib/wilai/models
+}
+
+_wilai_sshd_snippet() {
+    if [ -f /etc/ssh/sshd_config ] && [ -d /etc/ssh/sshd_config.d ] \
+        && [ ! -f /etc/ssh/sshd_config.d/50-wilai.conf ]; then
+        cat > /etc/ssh/sshd_config.d/50-wilai.conf <<'EOF'
+# wilai drop-shell: the `wilai` system user has /usr/bin/wilai-shell
+# as its login shell. Drop a client public key into
+# /var/lib/wilai/.ssh/authorized_keys and connect with
+#   ssh wilai@<host>
+# to land directly in Wilai's TUI.
+Match User wilai
+    AcceptEnv LANG LC_* COLORTERM TERM
+    AllowAgentForwarding no
+    AllowTcpForwarding no
+    X11Forwarding no
+    PermitTTY yes
+EOF
+        chmod 0644 /etc/ssh/sshd_config.d/50-wilai.conf
+        systemctl reload sshd 2>/dev/null || true
+    fi
+}
