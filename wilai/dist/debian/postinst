@@ -73,6 +73,34 @@ EOF
                     || true
             fi
         fi
+
+        # Fresh install only: tell the invoking user how to connect.
+        # The daemon's socket is group-rw for the `wilai` group; local
+        # users have to join that group before `wilai-shell` can talk
+        # to the daemon from their own tty.
+        if [ -z "$2" ]; then
+            # SUDO_USER is the human who ran `apt install`, if any.
+            target="${SUDO_USER:-}"
+            cat <<EOF
+
+══════════════════════════════════════════════════════════════════
+  Wilai installed.
+
+  To use \`wilai-shell\` from your own account, add yourself to
+  the \`wilai\` group once (one-time setup):
+
+      sudo usermod -aG wilai ${target:-\$USER}
+      newgrp wilai        # or log out + log back in
+
+  Then launch:
+
+      wilai-shell
+
+  (The \`wilai\` system user and anyone remoting in with
+   \`ssh wilai@host\` land straight in the TUI — no group needed.)
+══════════════════════════════════════════════════════════════════
+EOF
+        fi
         ;;
 
     abort-upgrade|abort-remove|abort-deconfigure)

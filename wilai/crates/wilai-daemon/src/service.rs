@@ -237,11 +237,18 @@ impl SocketServer {
         }
         let listener = UnixListener::bind(path)
             .with_context(|| format!("bind {}", path.display()))?;
-        // Lock down permissions to user-only.
+        // Socket perms: owner + group RW, world no access. The daemon
+        // runs as the `wilai` system user; members of the `wilai` group
+        // can connect. RBAC (opt-in, [rbac] enabled = true in config)
+        // further filters by UID. Local Linux users add themselves with
+        //   sudo usermod -aG wilai $USER
+        //   newgrp wilai
+        // SSH drop-shell path is unaffected (the `wilai` user itself
+        // owns the socket).
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let perms = std::fs::Permissions::from_mode(0o600);
+            let perms = std::fs::Permissions::from_mode(0o660);
             std::fs::set_permissions(path, perms).ok();
         }
         Ok(Self { listener, service })
