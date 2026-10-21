@@ -6,7 +6,7 @@ Architecture: @ARCH@
 Maintainer: WilOS <maintainer@wilos.example>
 Homepage: https://github.com/dimita/os_windows
 Depends: libc6, libxkbcommon0, systemd
-Recommends: ollama | ollama-cuda, networkmanager, pipewire, pipewire-pulse, alsa-utils, openssh-server, socat, python3, curl
+Recommends: ollama | ollama-cuda, network-manager, pipewire, pipewire-pulse, alsa-utils, openssh-server, socat, python3, curl
 Suggests: whisper-cpp, piper-tts, libnotify-bin, zenity, grim, scrot, nmap, nuclei, whatweb
 Description: Wilai — local, auditable system agent (AI shell for Linux)
  Wilai is an on-device AI agent that drives a Linux system through

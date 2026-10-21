@@ -57,7 +57,7 @@ postinst behavior: creates the `wilai` user, enables the daemon,
 drops `/etc/ssh/sshd_config.d/50-wilai.conf`.
 
 **Recommended apt deps** are listed in the control file: `ollama` (or
-`ollama-cuda`), `networkmanager`, `pipewire`, `openssh-server`,
+`ollama-cuda`), `network-manager`, `pipewire`, `openssh-server`,
 `socat`, `python3`, `curl`. Vision + voice + pentest tools are
 `Suggests:` so they do not pull in GUI stacks you did not ask for.
 

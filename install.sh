@@ -55,7 +55,7 @@ apt-get update -qq
 apt-get install -y -qq \
     curl ca-certificates \
     libxkbcommon0 \
-    networkmanager pipewire pipewire-pulse \
+    network-manager pipewire pipewire-pulse \
     openssh-server socat python3 \
     >/dev/null
 ok "apt deps installed"
