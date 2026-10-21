@@ -214,6 +214,22 @@ Keep each step short. Do not run the next step until the previous one \
 succeeded.
 ";
 
+const ROLLBACK_SEED: &str = "\
+[ROLLBACK]
+The user wants to roll Wilai back to an earlier version. Call \
+sys.wilai.rollback_list to see what snapshots exist. Read the \
+output back to the user: for each snapshot, show its version, \
+mark the current one, and note that older ones are stored under \
+/var/lib/wilai/rollback. Ask which version to restore. If the \
+user picks one, call sys.wilai.rollback with that version. Warn \
+the user that: 1) the daemon will restart and the shell will \
+briefly show 'connecting…', 2) if the memory DB schema is newer \
+than the target version expects, memory tools may fail until a \
+re-upgrade. If no snapshots are listed, tell the user that \
+/update takes a snapshot automatically — this becomes useful \
+after the next upgrade.
+";
+
 const REMOTES_SEED: &str = "\
 [REMOTES]
 List the federated Wilai instances declared in [remotes]. For each \
@@ -585,6 +601,13 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
                 app.busy = true;
                 return Some(KeyAction::SendPrompt(UPDATE_SEED.to_string()));
             }
+            if text == "/rollback" {
+                app.push(Who::You, text.clone());
+                app.push(Who::System, "listing rollback snapshots…");
+                app.set_face(FaceState::Thinking);
+                app.busy = true;
+                return Some(KeyAction::SendPrompt(ROLLBACK_SEED.to_string()));
+            }
             if text == "/remotes" {
                 app.push(Who::You, text.clone());
                 app.push(Who::System, "listing federated Wilai instances…");
@@ -651,6 +674,7 @@ Slash commands (type at the prompt and hit Enter):
   /wizard        re-run the first-boot setup (locale, wifi, user, …)
   /install       install WilOS from the live ISO to a disk
   /update        check for a Wilai update and apply it
+  /rollback      list snapshots and restore an earlier Wilai version
   /remotes       list federated Wilai instances declared in [remotes]
 
 Keybinds:

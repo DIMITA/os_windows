@@ -1,0 +1,22 @@
+name: sys.wilai.rollback_list
+version: 1
+description: List the snapshots stored under /var/lib/wilai/rollback. Each snapshot is a prior wilai install (binaries + YAML tools + systemd units) saved before an upgrade. Returns one JSON array; "current" marks the active one.
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["wilai-selfupdate", "list"]
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 16384
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "What versions can I roll back to?"

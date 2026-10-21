@@ -1,69 +1,363 @@
 #!/usr/bin/env bash
-# wilai-selfupdate — upgrade the wilai package and restart the services
-# that run its binaries. Called by sys.wilai.update. The shell talks to
-# the daemon over the unix socket, so the shell survives a daemon
-# restart (it just shows a brief "connecting…" and resumes).
+# wilai-selfupdate — upgrade/rollback the wilai install.
 #
-# Usage: wilai-selfupdate <dry_run> <include_hud>
-#   dry_run     ∈ {true,false}   when true, print the candidate version
-#                                  without touching anything
-#   include_hud ∈ {true,false}   when true, also restart wilai-hud
+# Subcommands:
+#   upgrade <dry_run> <include_hud>
+#       Legacy entry point (keeps sys.wilai.update's call site intact).
+#       dry_run=true just reports the candidate version; false does
+#       snapshot → pacman -S → systemctl restart.
+#   snapshot
+#       Copy currently-installed binaries + YAML tools + systemd
+#       units into /var/lib/wilai/rollback/<version>/ with a
+#       manifest.json. Updates the `current` symlink. Prunes to the
+#       newest MAX_SNAPSHOTS versions.
+#   list
+#       Print rollback snapshots as JSON (version, timestamp,
+#       bytes).
+#   restore <version>
+#       Copy a snapshot back into system paths and restart units.
+#   prune
+#       Keep the newest MAX_SNAPSHOTS, delete the rest.
+#
+# Design: Debian + Arch supported. Package-manager handling is
+# isolated in a small switch; everything else is portable.
+#
+# Positional backwards-compat: if the first arg looks like "true" or
+# "false", we assume the legacy pacman-only upgrade signature from v4.0:
+#     wilai-selfupdate <dry_run> <include_hud>
 
 set -euo pipefail
 
-dry_run="${1:-false}"
-include_hud="${2:-true}"
+ROLLBACK_ROOT=/var/lib/wilai/rollback
+MAX_SNAPSHOTS=3
+BIN_GLOB=(wilai wilai-daemon wilai-shell wilai-hud wilai-voice wilai-overlay
+         wilai-install wilai-remote wilai-screencap wilai-vision)
+HELPER_GLOB=(wilai-install wilai-remote wilai-screencap wilai-vision wilai-selfupdate)
+SYSTEM_UNITS=(wilai-daemon.service wilai-shell.service)
+USER_UNITS=(wilai.service wilai-hud.service)
 
 log() { printf 'wilai-selfupdate: %s\n' "$*" >&2; }
+die() { log "error: $*"; exit 2; }
 
-if ! command -v pacman >/dev/null 2>&1; then
-    log "pacman not found; this installer only supports Arch-based WilOS."
-    exit 2
-fi
+# -------- helpers -----------------------------------------------------
 
-log "refreshing pacman databases"
-pacman -Sy --noconfirm
+detect_pkg_mgr() {
+    if command -v pacman >/dev/null 2>&1 && pacman -Q wilai >/dev/null 2>&1; then
+        echo pacman
+    elif command -v dpkg >/dev/null 2>&1 && dpkg -s wilai >/dev/null 2>&1; then
+        echo dpkg
+    else
+        echo unknown
+    fi
+}
 
-installed=$(pacman -Q wilai 2>/dev/null | awk '{print $2}')
-candidate=$(pacman -Si wilai 2>/dev/null | awk -F': ' '/^Version/ {print $2; exit}')
+installed_version() {
+    local mgr; mgr=$(detect_pkg_mgr)
+    case "$mgr" in
+        pacman) pacman -Q wilai 2>/dev/null | awk '{print $2}' ;;
+        dpkg)   dpkg -s wilai 2>/dev/null | awk '/^Version:/ {print $2}' ;;
+        *)      /usr/bin/wilai --version 2>/dev/null | awk '{print $2}' ;;
+    esac
+}
 
-if [[ -z "$candidate" ]]; then
-    log "wilai is not in any repo; nothing to compare against"
-    exit 1
-fi
+candidate_version() {
+    local mgr; mgr=$(detect_pkg_mgr)
+    case "$mgr" in
+        pacman)
+            pacman -Sy --noconfirm >/dev/null 2>&1 || true
+            pacman -Si wilai 2>/dev/null | awk -F': ' '/^Version/ {print $2; exit}'
+            ;;
+        dpkg)
+            apt-get update >/dev/null 2>&1 || true
+            apt-cache policy wilai 2>/dev/null | awk '/Candidate:/ {print $2; exit}'
+            ;;
+        *) echo "" ;;
+    esac
+}
 
-log "installed=${installed:-none}  candidate=${candidate}"
+preflight_free_space() {
+    # Need roughly 2× the current install footprint free under
+    # /var/lib/wilai so the snapshot plus some margin fits.
+    local needed_kib=50000   # 50 MiB fallback floor
+    local in_bin=0
+    for b in "${BIN_GLOB[@]}"; do
+        if [ -f "/usr/bin/$b" ]; then
+            in_bin=$(( in_bin + $(stat -c '%s' "/usr/bin/$b") ))
+        fi
+    done
+    if [ "$in_bin" -gt 0 ]; then
+        needed_kib=$(( (in_bin / 1024) * 2 ))
+    fi
+    mkdir -p "$ROLLBACK_ROOT"
+    local avail_kib
+    avail_kib=$(df -Pk "$ROLLBACK_ROOT" | awk 'NR==2 {print $4}')
+    if [ -z "$avail_kib" ] || [ "$avail_kib" -lt "$needed_kib" ]; then
+        die "not enough free space under $ROLLBACK_ROOT: need ~${needed_kib} KiB, have ${avail_kib:-?} KiB"
+    fi
+}
 
-if [[ "$installed" == "$candidate" ]]; then
-    log "already on the latest version; nothing to do"
-    exit 0
-fi
+json_escape() {
+    # sed-based minimal JSON string escape — enough for versions /
+    # paths we control.
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+}
 
-if [[ "$dry_run" == "true" ]]; then
-    log "dry-run: new version ${candidate} is available"
-    exit 0
-fi
+# -------- snapshot ----------------------------------------------------
 
-log "upgrading wilai to ${candidate}"
-pacman -S --noconfirm wilai
+cmd_snapshot() {
+    preflight_free_space
+    local version; version=$(installed_version)
+    if [ -z "$version" ]; then
+        die "cannot determine installed wilai version"
+    fi
+    local mgr; mgr=$(detect_pkg_mgr)
+    local dst="$ROLLBACK_ROOT/$version"
+    log "snapshotting $version → $dst"
 
-# Restart the daemon last so the shell session doesn't lose the
-# connection before it has heard "upgrading..." back. The shell will
-# auto-reconnect on the fresh daemon.
-if [[ "$include_hud" == "true" ]] && systemctl --user list-unit-files 2>/dev/null \
-    | grep -q '^wilai-hud\.service'; then
-    log "restarting user wilai-hud.service"
-    systemctl --user restart wilai-hud.service || log "hud restart failed; continuing"
-fi
+    rm -rf "$dst"
+    mkdir -p "$dst/bin" "$dst/tools" "$dst/systemd/system" "$dst/systemd/user"
 
-if systemctl list-unit-files 2>/dev/null | grep -q '^wilai-daemon\.service'; then
-    log "restarting system wilai-daemon.service"
-    systemctl restart wilai-daemon.service
-elif systemctl --user list-unit-files 2>/dev/null | grep -q '^wilai\.service'; then
-    log "restarting user wilai.service"
-    systemctl --user restart wilai.service
-else
-    log "no wilai daemon unit found; expect manual restart"
-fi
+    # Binaries + helper scripts.
+    for b in "${BIN_GLOB[@]}" "${HELPER_GLOB[@]}"; do
+        if [ -f "/usr/bin/$b" ]; then
+            cp -a "/usr/bin/$b" "$dst/bin/"
+        fi
+    done
 
-log "upgrade complete; now running ${candidate}"
+    # YAML tool catalogue.
+    if [ -d /usr/share/wilai/tools ]; then
+        cp -a /usr/share/wilai/tools/. "$dst/tools/"
+    fi
+
+    # Systemd units (both system and user flavors; copy only what
+    # exists so we never ship stubs).
+    for u in "${SYSTEM_UNITS[@]}"; do
+        if [ -f "/usr/lib/systemd/system/$u" ]; then
+            cp -a "/usr/lib/systemd/system/$u" "$dst/systemd/system/"
+        fi
+    done
+    for u in "${USER_UNITS[@]}"; do
+        if [ -f "/usr/lib/systemd/user/$u" ]; then
+            cp -a "/usr/lib/systemd/user/$u" "$dst/systemd/user/"
+        fi
+    done
+
+    # Manifest.
+    local bytes; bytes=$(du -sb "$dst" | awk '{print $1}')
+    local ts; ts=$(date -Iseconds)
+    cat > "$dst/manifest.json" <<EOF
+{
+  "version":   "$(json_escape "$version")",
+  "pkg_mgr":   "$(json_escape "$mgr")",
+  "timestamp": "$(json_escape "$ts")",
+  "bytes":     $bytes,
+  "paths": {
+    "bin":     "/usr/bin",
+    "tools":   "/usr/share/wilai/tools",
+    "sys_units":  "/usr/lib/systemd/system",
+    "user_units": "/usr/lib/systemd/user"
+  }
+}
+EOF
+    ln -sfn "$version" "$ROLLBACK_ROOT/current"
+    log "snapshot ok ($(numfmt --to=iec "$bytes" 2>/dev/null || echo "$bytes bytes"))"
+    cmd_prune
+}
+
+# -------- list --------------------------------------------------------
+
+cmd_list() {
+    mkdir -p "$ROLLBACK_ROOT"
+    local current=""
+    if [ -L "$ROLLBACK_ROOT/current" ]; then
+        current=$(readlink "$ROLLBACK_ROOT/current")
+    fi
+    printf '['
+    local first=1
+    local v
+    for v in $(ls -1 "$ROLLBACK_ROOT" 2>/dev/null | sort -r); do
+        [ -d "$ROLLBACK_ROOT/$v" ] || continue
+        [ -f "$ROLLBACK_ROOT/$v/manifest.json" ] || continue
+        if [ "$first" -eq 0 ]; then
+            printf ','
+        fi
+        first=0
+        local is_current="false"
+        [ "$v" = "$current" ] && is_current="true"
+        printf '{"version":"%s","current":%s,"manifest_path":"%s"}' \
+            "$(json_escape "$v")" "$is_current" \
+            "$(json_escape "$ROLLBACK_ROOT/$v/manifest.json")"
+    done
+    printf ']\n'
+}
+
+# -------- restore -----------------------------------------------------
+
+cmd_restore() {
+    local version="${1:-}"
+    [ -n "$version" ] || die "restore: missing version argument"
+    local src="$ROLLBACK_ROOT/$version"
+    [ -d "$src" ] || die "no snapshot at $src"
+    [ -f "$src/manifest.json" ] || die "corrupt snapshot (no manifest) at $src"
+
+    log "restoring wilai $version from $src"
+
+    # Take a safety snapshot of what we are about to overwrite so a
+    # bad restore can still be undone. Skipped silently if snapshot
+    # fails (we are already in recovery mode — don't block).
+    cmd_snapshot >/dev/null 2>&1 || log "pre-restore snapshot skipped"
+
+    # Binaries.
+    for b in "$src/bin"/*; do
+        [ -f "$b" ] || continue
+        install -m 0755 "$b" "/usr/bin/$(basename "$b")"
+    done
+
+    # YAML tool catalogue — mirror the snapshot exactly.
+    if [ -d "$src/tools" ] && [ -d /usr/share/wilai/tools ]; then
+        rm -rf /usr/share/wilai/tools
+        mkdir -p /usr/share/wilai/tools
+        cp -a "$src/tools/." /usr/share/wilai/tools/
+    fi
+
+    # Systemd units.
+    if [ -d "$src/systemd/system" ]; then
+        for u in "$src/systemd/system"/*; do
+            [ -f "$u" ] || continue
+            install -m 0644 "$u" "/usr/lib/systemd/system/$(basename "$u")"
+        done
+    fi
+    if [ -d "$src/systemd/user" ]; then
+        for u in "$src/systemd/user"/*; do
+            [ -f "$u" ] || continue
+            install -m 0644 "$u" "/usr/lib/systemd/user/$(basename "$u")"
+        done
+    fi
+
+    ln -sfn "$version" "$ROLLBACK_ROOT/current"
+
+    # Restart the daemon last so the shell doesn't lose the socket
+    # before the restore line gets logged.
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload || true
+        systemctl try-restart wilai-daemon.service 2>/dev/null \
+            || systemctl --user try-restart wilai.service 2>/dev/null \
+            || true
+    fi
+
+    log "restored wilai $version"
+}
+
+# -------- prune -------------------------------------------------------
+
+cmd_prune() {
+    mkdir -p "$ROLLBACK_ROOT"
+    local keep=$MAX_SNAPSHOTS
+    local versions
+    versions=$(ls -1 "$ROLLBACK_ROOT" 2>/dev/null | while read -r v; do
+        [ -d "$ROLLBACK_ROOT/$v" ] || continue
+        [ -f "$ROLLBACK_ROOT/$v/manifest.json" ] || continue
+        echo "$v"
+    done | sort -r)
+    local idx=0
+    local v
+    for v in $versions; do
+        idx=$(( idx + 1 ))
+        if [ "$idx" -gt "$keep" ]; then
+            log "pruning old snapshot $v"
+            rm -rf "$ROLLBACK_ROOT/$v"
+        fi
+    done
+}
+
+# -------- upgrade (legacy entry point) --------------------------------
+
+cmd_upgrade() {
+    local dry_run="${1:-false}"
+    local include_hud="${2:-true}"
+
+    local mgr; mgr=$(detect_pkg_mgr)
+    if [ "$mgr" = unknown ]; then
+        die "cannot find a package manager that owns wilai"
+    fi
+    log "package manager: $mgr"
+
+    local installed candidate
+    installed=$(installed_version)
+    candidate=$(candidate_version)
+    if [ -z "$candidate" ]; then
+        die "cannot determine candidate version"
+    fi
+    log "installed=${installed:-none}  candidate=${candidate}"
+    if [ "$installed" = "$candidate" ]; then
+        log "already on the latest version; nothing to do"
+        return 0
+    fi
+    if [ "$dry_run" = true ]; then
+        log "dry-run: new version ${candidate} is available"
+        return 0
+    fi
+
+    # Take a snapshot BEFORE touching the package manager.
+    cmd_snapshot
+
+    case "$mgr" in
+        pacman) pacman -S --noconfirm wilai ;;
+        dpkg)   apt-get install -y --only-upgrade wilai ;;
+    esac
+
+    if [ "$include_hud" = true ] && command -v systemctl >/dev/null 2>&1 \
+        && systemctl --user list-unit-files 2>/dev/null \
+            | grep -q '^wilai-hud\.service'; then
+        log "restarting user wilai-hud.service"
+        systemctl --user restart wilai-hud.service || true
+    fi
+
+    if command -v systemctl >/dev/null 2>&1; then
+        if systemctl list-unit-files 2>/dev/null | grep -q '^wilai-daemon\.service'; then
+            log "restarting system wilai-daemon.service"
+            systemctl restart wilai-daemon.service
+        elif systemctl --user list-unit-files 2>/dev/null | grep -q '^wilai\.service'; then
+            log "restarting user wilai.service"
+            systemctl --user restart wilai.service
+        else
+            log "no wilai daemon unit found; expect manual restart"
+        fi
+    fi
+    log "upgrade complete; now running ${candidate}"
+}
+
+# -------- dispatcher --------------------------------------------------
+
+main() {
+    [ "$#" -ge 1 ] || { log "usage: wilai-selfupdate <subcommand>"; exit 2; }
+    local first="$1"
+    # Legacy call pattern from v4.0 sys.wilai.update:
+    #   wilai-selfupdate <dry_run> <include_hud>
+    if [ "$first" = true ] || [ "$first" = false ]; then
+        cmd_upgrade "$@"
+        return
+    fi
+    shift
+    case "$first" in
+        upgrade)   cmd_upgrade "$@" ;;
+        snapshot)  cmd_snapshot ;;
+        list)      cmd_list ;;
+        restore)   cmd_restore "$@" ;;
+        prune)     cmd_prune ;;
+        -h|--help|help)
+            cat <<EOF >&2
+Subcommands:
+  wilai-selfupdate upgrade <dry_run> <include_hud>
+  wilai-selfupdate snapshot
+  wilai-selfupdate list                             # JSON
+  wilai-selfupdate restore <version>
+  wilai-selfupdate prune
+Legacy: wilai-selfupdate <dry_run> <include_hud>   # == upgrade
+EOF
+            ;;
+        *) log "unknown subcommand: $first"; exit 2 ;;
+    esac
+}
+
+main "$@"

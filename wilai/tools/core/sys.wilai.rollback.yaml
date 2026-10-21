@@ -1,0 +1,31 @@
+name: sys.wilai.rollback
+version: 1
+description: Roll Wilai back to a previously-snapshotted version. The daemon restarts; the shell reconnects automatically. Takes a safety snapshot of the current state first.
+category: privileged
+risk: high
+
+inputs:
+  version:
+    type: string
+    required: true
+    pattern: "^[0-9]+\\.[0-9]+\\.[0-9]+([.\\-+a-zA-Z0-9]*)?$"
+    description: Version to restore. Must match one of sys.wilai.rollback_list.
+
+guards:
+  - if: "always()"
+    confirm: "Roll Wilai back to {version}? The daemon restarts; the shell reconnects automatically. If the new memory DB has a newer schema than {version} expects, memory may be unavailable until you re-upgrade."
+
+executor:
+  type: subprocess
+  cmd: ["wilai-selfupdate", "restore", "{version}"]
+  timeout_s: 120
+  output:
+    capture: both
+    max_bytes: 16384
+
+audit:
+  fields: [version]
+
+examples:
+  - args: { version: "0.9.0" }
+    note: "Roll back after a bad upgrade."
