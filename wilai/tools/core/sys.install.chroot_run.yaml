@@ -1,0 +1,39 @@
+name: sys.install.chroot_run
+version: 1
+description: Run a command inside the installed target via arch-chroot. Use for one-off commands that must run from the new system's perspective (e.g. locale-gen, hwclock, user creation).
+category: privileged
+risk: high
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+  argv:
+    type: array
+    required: true
+    items: { type: string }
+    description: Command and arguments (first element is the binary name).
+
+guards:
+  - if: "always()"
+    confirm: "Run inside {target}: {argv}. Confirm?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "chroot-exec", "{target}", "--", "{argv}"]
+  timeout_s: 600
+  output:
+    capture: both
+    max_bytes: 65536
+
+audit:
+  fields: [target, argv]
+
+examples:
+  - args: { target: "/mnt", argv: ["locale-gen"] }
+    note: "Regenerate locales inside the new system."
+  - args: { target: "/mnt", argv: ["hwclock", "--systohc"] }
+    note: "Sync the hardware clock."

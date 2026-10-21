@@ -1,0 +1,39 @@
+name: sys.install.pacstrap
+version: 1
+description: Install the base system into the mounted target via pacstrap. This pulls packages from the live Pacman cache first, then network.
+category: privileged
+risk: high
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root (where the new system is being built).
+  packages:
+    type: array
+    required: true
+    items: { type: string, pattern: "^[a-zA-Z0-9._+\\-]+$" }
+    description: Packages to install (minimum base + base-devel + linux + linux-firmware + networkmanager + ollama + wilai).
+
+guards:
+  - if: "always()"
+    confirm: "Install {packages} into {target}. This pulls packages (possibly over the network). Confirm?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "pacstrap", "{target}", "{packages}"]
+  timeout_s: 3600
+  output:
+    capture: both
+    max_bytes: 524288
+
+audit:
+  fields: [target, packages]
+
+examples:
+  - args:
+      target: "/mnt"
+      packages: ["base", "base-devel", "linux", "linux-firmware", "networkmanager", "ollama", "wilai"]
+    note: "Minimal WilOS-Core install."

@@ -38,6 +38,8 @@ package() {
     install -Dm755 target/release/wilai-shell    "$pkgdir/usr/bin/wilai-shell"
     install -Dm755 target/release/wilai-voice    "$pkgdir/usr/bin/wilai-voice"
     install -Dm755 target/release/wilai-overlay  "$pkgdir/usr/bin/wilai-overlay"
+    # Installer helper (bash) — called by sys.install.* YAML tools.
+    install -Dm755 scripts/wilai-install         "$pkgdir/usr/bin/wilai-install"
 
     # Ship the entire tools/ tree (core/ + pentest/ subdirs).
     install -d "$pkgdir/usr/share/wilai/tools/core"

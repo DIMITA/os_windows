@@ -1,0 +1,38 @@
+name: sys.install.bootloader_grub
+version: 1
+description: Install GRUB (EFI mode) into the mounted ESP and generate /boot/grub/grub.cfg.
+category: privileged
+risk: high
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+  esp:
+    type: string
+    required: false
+    default: "/mnt/boot"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: ESP mountpoint inside the host (install root + /boot).
+
+guards:
+  - if: "always()"
+    confirm: "Install GRUB EFI boot entry WilOS at {esp} and generate grub.cfg?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "bootloader-grub-efi", "{target}", "{esp}"]
+  timeout_s: 180
+  output:
+    capture: both
+    max_bytes: 32768
+
+audit:
+  fields: [target, esp]
+
+examples:
+  - args: { target: "/mnt", esp: "/mnt/boot" }
+    note: "Boot WilOS from GRUB on EFI."

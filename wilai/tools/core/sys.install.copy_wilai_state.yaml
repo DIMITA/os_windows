@@ -1,0 +1,32 @@
+name: sys.install.copy_wilai_state
+version: 1
+description: Copy /var/lib/wilai (memory, audit log, facts) from the live ISO into the installed system so what the user told Wilai during setup survives the reboot. Excludes wizard/install markers.
+category: privileged
+risk: low
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+
+guards:
+  - if: "always()"
+    confirm: "Copy Wilai state (memory, audit log, facts) into {target}?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "copy-wilai-state", "{target}"]
+  timeout_s: 60
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [target]
+
+examples:
+  - args: { target: "/mnt" }
+    note: "Preserve what Wilai learned about the user during the live session."

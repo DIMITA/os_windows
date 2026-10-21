@@ -1,0 +1,31 @@
+name: sys.disk.swapon
+version: 1
+description: Activate a swap partition for the live session.
+category: privileged
+risk: low
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: Swap device (already mkswap'd).
+
+guards:
+  - if: "always()"
+    confirm: "Enable swap on {device}?"
+
+executor:
+  type: subprocess
+  cmd: ["swapon", "{device}"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 2048
+
+audit:
+  fields: [device]
+
+examples:
+  - args: { device: "/dev/sda3" }
+    note: "Activate the swap partition for this session."

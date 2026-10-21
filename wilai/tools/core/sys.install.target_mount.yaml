@@ -1,0 +1,37 @@
+name: sys.install.target_mount
+version: 1
+description: Mount an already-formatted partition at the install target root (/mnt by convention). Creates the target directory.
+category: privileged
+risk: medium
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: Partition to mount as the install root.
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root (/mnt by convention).
+
+guards:
+  - if: "always()"
+    confirm: "Mount {device} at {target} as the install root?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "mount-target", "{device}", "{target}"]
+  timeout_s: 15
+  output:
+    capture: both
+    max_bytes: 2048
+
+audit:
+  fields: [device, target]
+
+examples:
+  - args: { device: "/dev/sda2", target: "/mnt" }
+    note: "Mount the root partition at /mnt."

@@ -9,7 +9,8 @@ linux-firmware
 intel-ucode
 amd-ucode
 
-# Boot / live-media essentials
+# Boot / live-media essentials (also used by the on-disk installer that
+# Wilai drives via sys.disk.* and sys.install.*).
 arch-install-scripts
 syslinux
 grub
@@ -22,6 +23,8 @@ f2fs-tools
 mtools
 squashfs-tools
 edk2-shell
+gptfdisk       # provides sgdisk
+parted
 
 # Networking
 networkmanager

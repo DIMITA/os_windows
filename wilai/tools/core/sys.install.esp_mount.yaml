@@ -1,0 +1,37 @@
+name: sys.install.esp_mount
+version: 1
+description: Mount the EFI System Partition at <target>/boot. Target must already be mounted.
+category: privileged
+risk: medium
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: ESP partition (fat32).
+  target:
+    type: string
+    required: false
+    default: "/mnt/boot"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Mountpoint for the ESP (install_root/boot).
+
+guards:
+  - if: "always()"
+    confirm: "Mount ESP {device} at {target}?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "mount-esp", "{device}", "{target}"]
+  timeout_s: 15
+  output:
+    capture: both
+    max_bytes: 2048
+
+audit:
+  fields: [device, target]
+
+examples:
+  - args: { device: "/dev/sda1", target: "/mnt/boot" }
+    note: "Mount the ESP under /mnt/boot."

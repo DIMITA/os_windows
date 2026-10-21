@@ -1,0 +1,63 @@
+name: sys.disk.sgdisk_new
+version: 1
+description: Create one GPT partition on a device via sgdisk. Call once per partition to lay out a disk.
+category: destructive
+risk: high
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: Target block device.
+  index:
+    type: integer
+    required: true
+    min: 1
+    max: 128
+    description: Partition number (1-based).
+  size:
+    type: string
+    required: true
+    pattern: "^(0|[0-9]+[KMGTkmgt]?)$"
+    description: Size, e.g. "512M", "40G", or "0" for "fill the rest of the disk".
+  type_code:
+    type: string
+    required: true
+    pattern: "^[0-9a-fA-F]{4}$"
+    description: sgdisk type code (hex4). ef00=ESP, 8300=Linux fs, 8200=Linux swap, 8304=Linux x86-64 root.
+  label:
+    type: string
+    required: false
+    default: ""
+    pattern: "^[A-Za-z0-9 _\\-]{0,36}$"
+    description: Partition label.
+
+guards:
+  - if: "always()"
+    confirm: "Create partition {index} on {device} ({size}, type {type_code})?"
+
+executor:
+  type: subprocess
+  cmd:
+    - "sgdisk"
+    - "-n"
+    - "{index}:0:+{size}"
+    - "-t"
+    - "{index}:{type_code}"
+    - "-c"
+    - "{index}:{label}"
+    - "{device}"
+  timeout_s: 20
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [device, index, size, type_code, label]
+
+examples:
+  - args: { device: "/dev/sda", index: 1, size: "512M", type_code: "ef00", label: "ESP" }
+    note: "EFI System Partition."
+  - args: { device: "/dev/sda", index: 2, size: "0", type_code: "8304", label: "root" }
+    note: "Linux root, fill the rest."

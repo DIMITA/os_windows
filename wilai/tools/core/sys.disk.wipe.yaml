@@ -1,0 +1,31 @@
+name: sys.disk.wipe
+version: 1
+description: Zap the GPT and MBR on a block device. Everything on it becomes unreadable. This is destructive and irreversible.
+category: destructive
+risk: critical
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: Block device to wipe (e.g. /dev/sda, /dev/nvme0n1).
+
+guards:
+  - if: "always()"
+    confirm: "WIPE every partition on {device}. All data on it will be LOST. Confirm?"
+
+executor:
+  type: subprocess
+  cmd: ["sgdisk", "--zap-all", "{device}"]
+  timeout_s: 60
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [device]
+
+examples:
+  - args: { device: "/dev/sda" }
+    note: "Clear the partition table on /dev/sda."

@@ -1,0 +1,48 @@
+name: sys.install.user_create
+version: 1
+description: Create a user inside the installed target (and optionally add them to wheel for sudo). Does NOT set the password; use sys.install.chroot_run with passwd afterwards.
+category: privileged
+risk: high
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+  username:
+    type: string
+    required: true
+    pattern: "^[a-z_][a-z0-9_\\-]{0,30}$"
+    description: Login name.
+  wheel:
+    type: boolean
+    default: true
+    description: Add the user to wheel (sudo). Default yes.
+
+guards:
+  - if: "arg_true(wheel)"
+    confirm: "Create user {username} in {target} with sudo (wheel)?"
+  - if: "not arg_true(wheel)"
+    confirm: "Create user {username} in {target} (no sudo)?"
+
+executor:
+  type: subprocess
+  cmd:
+    - "wilai-install"
+    - "create-user"
+    - "{target}"
+    - "{username}"
+    - "wheel-{wheel}"
+  timeout_s: 30
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [target, username, wheel]
+
+examples:
+  - args: { target: "/mnt", username: "nora", wheel: true }
+    note: "Primary user with sudo."

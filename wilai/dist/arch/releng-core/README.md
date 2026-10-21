@@ -34,6 +34,29 @@ qemu-system-x86_64 -enable-kvm -m 4G \
     -nic user,model=virtio
 ```
 
+## Installing WilOS to disk
+
+The ISO boots to the live Wilai shell. To install WilOS permanently on
+a disk, type **`/install`** at the Wilai prompt. Wilai then walks you
+through the sequence conversationally, confirming at each destructive
+step:
+
+1. Inventory block devices (`sys.disk.list`) and ask which target to use
+2. Wipe (`sys.disk.wipe`), partition (`sys.disk.sgdisk_new`), format
+   (`sys.disk.format`)
+3. Mount (`sys.install.target_mount`, `sys.install.esp_mount`)
+4. Pacstrap the base system (`sys.install.pacstrap`)
+5. Generate fstab (`sys.install.genfstab`)
+6. Timezone, locale, hostname, user (`sys.install.chroot_run`,
+   `sys.install.user_create`)
+7. Install the bootloader (`sys.install.bootloader_grub`)
+8. Enable services on the new system (`sys.install.enable_service`)
+9. Copy Wilai memory + facts (`sys.install.copy_wilai_state`) so what
+   you taught it during the live session survives the reboot
+
+Every mutating step prompts for confirmation, and the whole sequence is
+hash-chain audited in `/var/lib/wilai/audit/` on the live system.
+
 ## Voice I/O
 
 The ISO ships `whisper.cpp`, `piper` and `alsa-utils`. To enable voice:

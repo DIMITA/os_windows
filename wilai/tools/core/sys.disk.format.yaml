@@ -1,0 +1,44 @@
+name: sys.disk.format
+version: 1
+description: Create a filesystem (or swap area) on a block device via mkfs.*. Overwrites any previous content on that device.
+category: destructive
+risk: critical
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/_\\-]+$"
+    description: Block device (partition) to format.
+  fs_type:
+    type: enum
+    required: true
+    values: [ext4, btrfs, xfs, f2fs, vfat, swap]
+    description: Filesystem to create (or "swap" to make a swap area).
+  label:
+    type: string
+    required: false
+    default: ""
+    pattern: "^[A-Za-z0-9 _\\-]{0,36}$"
+    description: Filesystem label.
+
+guards:
+  - if: "always()"
+    confirm: "Format {device} as {fs_type}. Any existing data on it will be LOST. Confirm?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "format", "{device}", "{fs_type}", "{label}"]
+  timeout_s: 300
+  output:
+    capture: both
+    max_bytes: 8192
+
+audit:
+  fields: [device, fs_type, label]
+
+examples:
+  - args: { device: "/dev/sda2", fs_type: "ext4", label: "wilos-root" }
+    note: "Format the root partition."
+  - args: { device: "/dev/sda1", fs_type: "vfat", label: "ESP" }
+    note: "Format the EFI system partition."

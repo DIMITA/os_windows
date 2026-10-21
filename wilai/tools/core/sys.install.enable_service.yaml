@@ -1,0 +1,39 @@
+name: sys.install.enable_service
+version: 1
+description: Enable a systemd unit on the installed target so it starts after reboot.
+category: privileged
+risk: medium
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+  unit:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9@._\\-]+(\\.(service|socket|timer|target|mount|path))?$"
+    description: Unit name.
+
+guards:
+  - if: "always()"
+    confirm: "Enable {unit} on {target} (will start on boot)?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "enable-service", "{target}", "{unit}"]
+  timeout_s: 15
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [target, unit]
+
+examples:
+  - args: { target: "/mnt", unit: "NetworkManager" }
+    note: "Make sure networking comes up on first boot of the installed system."
+  - args: { target: "/mnt", unit: "wilai-daemon.service" }
+    note: "Wilai itself."

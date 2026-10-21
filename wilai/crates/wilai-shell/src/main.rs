@@ -55,6 +55,10 @@ struct Cli {
     /// Run the first-boot setup wizard then exit.
     #[arg(long)]
     wizard: bool,
+    /// Start in installer mode: seed the agent with the install script
+    /// that walks the user through disk layout, pacstrap, bootloader.
+    #[arg(long)]
+    install: bool,
     /// Enable voice I/O (push-to-talk on F2, TTS of replies).
     #[arg(long)]
     voice: bool,
@@ -133,7 +137,9 @@ async fn main() -> Result<()> {
         None
     };
 
-    let wizard_seed = if cli.wizard || wizard_pending() {
+    let wizard_seed = if cli.install || install_pending() {
+        Some(INSTALL_SEED.to_string())
+    } else if cli.wizard || wizard_pending() {
         Some(WIZARD_SEED.to_string())
     } else {
         None
@@ -157,12 +163,30 @@ fn wizard_marker_path() -> PathBuf {
     PathBuf::from("/var/lib/wilai/wizard-pending")
 }
 
+fn install_marker_path() -> PathBuf {
+    PathBuf::from("/var/lib/wilai/install-pending")
+}
+
 fn wizard_pending() -> bool {
     wizard_marker_path().exists()
 }
 
+fn install_pending() -> bool {
+    install_marker_path().exists()
+}
+
 fn clear_wizard_marker() {
     let _ = std::fs::remove_file(wizard_marker_path());
+    let _ = std::fs::remove_file(install_marker_path());
+}
+
+/// Lay the install-pending marker so the next shell boot (or a /install
+/// slash command inside the current session) re-seeds in installer mode.
+fn set_install_marker() -> std::io::Result<()> {
+    if let Some(parent) = install_marker_path().parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(install_marker_path(), b"1")
 }
 
 const WIZARD_SEED: &str = "\
@@ -183,9 +207,70 @@ on. Steps in order:
      office, security) and offer bundles via sys.pkg.install.
   6. Finish: tell the user setup is done and that from now on they can \
      just talk to you. Call memory.fact_set with key=\"setup\" value=\"done\".
+  7. Ask the user whether they want to install WilOS to a disk now. If \
+     yes, tell them to type `/install`.
 
 Keep each step short. Do not run the next step until the previous one \
 succeeded.
+";
+
+const INSTALL_SEED: &str = "\
+[INSTALLER]
+The user wants to install WilOS to a disk. You are running from the \
+live ISO; the installer tools are available under sys.disk.* and \
+sys.install.*. Walk through the sequence below, confirming with the \
+user at each decision point. Speak in the configured persona style; \
+be explicit about what will be lost.
+
+  1. INVENTORY. Run sys.disk.list and read the output back to the user. \
+     Ask which block device to install onto (e.g. /dev/sda or \
+     /dev/nvme0n1). If several candidates exist, list each with its \
+     size + label.
+  2. CONFIRM WIPE. Make the user acknowledge, in their own words, that \
+     every byte on the chosen device will be destroyed. Then call \
+     sys.disk.wipe with that device.
+  3. PARTITION. Default scheme on EFI:
+       - part 1: 512M, type ef00, label ESP
+       - part 2: rest, type 8304, label root
+     Call sys.disk.sgdisk_new twice with those arguments. If the user \
+     wants swap, insert it as part 2 (type 8200, label swap, size \
+     chosen by the user), then part 3 becomes root.
+  4. FORMAT. sys.disk.format each partition: vfat on the ESP, ext4 (or \
+     btrfs if the user asks) on root, swap on the swap partition. \
+     Activate swap now with sys.disk.swapon.
+  5. MOUNT. sys.install.target_mount for root at /mnt, then \
+     sys.install.esp_mount for the ESP at /mnt/boot.
+  6. PACSTRAP. sys.install.pacstrap /mnt with: base base-devel linux \
+     linux-firmware intel-ucode amd-ucode networkmanager pipewire \
+     pipewire-pulse wireplumber alsa-utils openssh grub efibootmgr \
+     sudo nano vim git ollama wilai whisper.cpp piper.
+  7. FSTAB. sys.install.genfstab /mnt.
+  8. TIMEZONE + LOCALE. sys.install.chroot_run /mnt with [\"ln\", \"-sf\", \
+     \"/usr/share/zoneinfo/<tz>\", \"/etc/localtime\"] using the tz the \
+     user tells you. Then sys.install.chroot_run with [\"hwclock\", \
+     \"--systohc\"]. Then sys.install.chroot_run with [\"locale-gen\"] \
+     after writing /etc/locale.gen inside the chroot.
+  9. HOSTNAME. Ask for a hostname, then sys.install.chroot_run with \
+     [\"sh\", \"-c\", \"echo <name> > /etc/hostname\"].
+  10. USER. sys.install.user_create for the primary user (wheel=true \
+     unless they say otherwise). Then ask for a password and run \
+     sys.install.chroot_run with [\"passwd\", \"<user>\"] — the shell \
+     will relay the typed password.
+  11. BOOTLOADER. sys.install.bootloader_grub target=/mnt esp=/mnt/boot.
+  12. SERVICES. sys.install.enable_service for each of: \
+     NetworkManager.service, systemd-timesyncd.service, ollama.service, \
+     wilai-daemon.service, wilai-shell.service.
+  13. CARRY STATE. sys.install.copy_wilai_state target=/mnt so the \
+     facts and notes you learned on the live session survive the reboot.
+  14. FINISH. Tell the user the installation is complete, that they \
+     should reboot and remove the install medium, and that Wilai will \
+     greet them again on the new system.
+
+Rules:
+  - NEVER run a destructive step without the user acknowledging it.
+  - If a step fails, STOP, report the error, and ask the user how to \
+    proceed. Do not retry blindly.
+  - Keep each message short — one step at a time.
 ";
 
 type Term = Terminal<CrosstermBackend<Stdout>>;
@@ -456,6 +541,24 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
                 return None;
             }
             app.input.clear();
+            // Local slash commands intercepted by the shell.
+            if text == "/install" {
+                app.push(Who::You, text.clone());
+                app.push(Who::System, "entering installer mode…");
+                if let Err(e) = set_install_marker() {
+                    app.push(Who::System, format!("could not lay install marker: {e}"));
+                }
+                app.set_face(FaceState::Thinking);
+                app.busy = true;
+                return Some(KeyAction::SendPrompt(INSTALL_SEED.to_string()));
+            }
+            if text == "/wizard" {
+                app.push(Who::You, text.clone());
+                app.push(Who::System, "re-running the first-boot wizard…");
+                app.set_face(FaceState::Thinking);
+                app.busy = true;
+                return Some(KeyAction::SendPrompt(WIZARD_SEED.to_string()));
+            }
             app.push(Who::You, text.clone());
             app.set_face(FaceState::Thinking);
             app.busy = true;

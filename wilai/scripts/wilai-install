@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# wilai-install — thin, auditable wrapper around the Arch install
+# primitives that need shell redirection, chroot-ing or multi-step
+# sequences. Called by the sys.install.* YAML tools.
+#
+# Every subcommand validates its arguments, logs what it is about to
+# do, and runs with `set -euo pipefail`. It is small on purpose: the
+# LLM should still see a straightforward sequence of named operations,
+# not an opinionated installer.
+
+set -euo pipefail
+
+log() { printf 'wilai-install: %s\n' "$*" >&2; }
+die() { log "error: $*"; exit 2; }
+
+# Guard against obvious shell-injection via an unquoted expansion in a
+# chroot command. We only ever accept paths matching this pattern.
+is_abs_path() { [[ "$1" == /* && "$1" != *'..'* && "$1" != *$'\n'* ]]; }
+is_devpath()  { [[ "$1" =~ ^/dev/[a-zA-Z0-9/_-]+$ ]]; }
+
+usage() {
+    cat <<'EOF' >&2
+Usage: wilai-install <subcommand> [args]
+
+Subcommands:
+  format <device> <ext4|btrfs|xfs|f2fs|vfat|swap> [label]
+      Create a filesystem (or swap area) on <device>. Confirmed by
+      the caller; this script does not prompt.
+  mount-target <device> <target>
+      Mount <device> at <target> (creates <target>).
+  mount-esp <device> <target>/boot
+      Mount the EFI system partition at <target>/boot.
+  genfstab <target>
+      Run genfstab -U <target> >> <target>/etc/fstab.
+  pacstrap <target> <pkg...>
+      Run pacstrap -K <target> <pkg...>.
+  chroot-exec <target> -- <cmd...>
+      arch-chroot <target> <cmd...>.
+  bootloader-grub-efi <target> <esp-mount>
+      Install GRUB in EFI mode and generate /boot/grub/grub.cfg.
+  bootloader-systemd-boot <target>
+      Install systemd-boot into the ESP mounted at <target>/boot.
+  enable-service <target> <unit>
+      systemctl --root=<target> enable <unit>.
+  create-user <target> <user> <wheel-yes|wheel-no|wheel-true|wheel-false>
+      Create <user> inside the chroot. The caller sets the password
+      in a follow-up step.
+  copy-wilai-state <target>
+      Copy /var/lib/wilai from the live ISO into the installed system
+      so the setup Wilai did (facts, memory) survives the reboot.
+EOF
+}
+
+cmd_format() {
+    local device="$1" fs="$2" label="${3:-}"
+    is_devpath "$device" || die "bad device: $device"
+    case "$fs" in
+        ext4)  mkfs.ext4 -F ${label:+-L "$label"} "$device" ;;
+        btrfs) mkfs.btrfs -f ${label:+-L "$label"} "$device" ;;
+        xfs)   mkfs.xfs  -f ${label:+-L "$label"} "$device" ;;
+        f2fs)  mkfs.f2fs -f ${label:+-l "$label"} "$device" ;;
+        vfat)  mkfs.fat  -F32 ${label:+-n "$label"} "$device" ;;
+        swap)  mkswap ${label:+-L "$label"} "$device" ;;
+        *)     die "unknown fs: $fs" ;;
+    esac
+}
+
+cmd_mount_target() {
+    local device="$1" target="$2"
+    is_devpath "$device" || die "bad device: $device"
+    is_abs_path "$target" || die "bad target: $target"
+    mkdir -p "$target"
+    mount "$device" "$target"
+}
+
+cmd_mount_esp() {
+    local device="$1" target="$2"
+    is_devpath "$device" || die "bad device: $device"
+    is_abs_path "$target" || die "bad target: $target"
+    mkdir -p "$target"
+    mount -o umask=0077 "$device" "$target"
+}
+
+cmd_genfstab() {
+    local target="$1"
+    is_abs_path "$target" || die "bad target: $target"
+    [[ -d "$target" ]] || die "target not a dir: $target"
+    genfstab -U "$target" >> "$target/etc/fstab"
+}
+
+cmd_pacstrap() {
+    local target="$1"; shift
+    is_abs_path "$target" || die "bad target: $target"
+    [[ $# -ge 1 ]] || die "pacstrap: missing package list"
+    pacstrap -K "$target" "$@"
+}
+
+cmd_chroot_exec() {
+    local target="$1"; shift
+    is_abs_path "$target" || die "bad target: $target"
+    [[ "${1:-}" == "--" ]] && shift
+    [[ $# -ge 1 ]] || die "chroot-exec: missing command"
+    arch-chroot "$target" "$@"
+}
+
+cmd_bootloader_grub_efi() {
+    local target="$1" esp="$2"
+    is_abs_path "$target" || die "bad target: $target"
+    is_abs_path "$esp"    || die "bad esp: $esp"
+    arch-chroot "$target" grub-install --target=x86_64-efi \
+        --efi-directory="${esp#$target}" --bootloader-id=WilOS
+    arch-chroot "$target" grub-mkconfig -o /boot/grub/grub.cfg
+}
+
+cmd_bootloader_systemd_boot() {
+    local target="$1"
+    is_abs_path "$target" || die "bad target: $target"
+    arch-chroot "$target" bootctl --path=/boot install
+    # Minimal loader + default entry. Users can edit after reboot.
+    cat > "$target/boot/loader/loader.conf" <<EOF
+default wilos.conf
+timeout 3
+console-mode max
+editor no
+EOF
+    # The entry file is written by the caller once the root UUID is known.
+}
+
+cmd_enable_service() {
+    local target="$1" unit="$2"
+    is_abs_path "$target" || die "bad target: $target"
+    [[ "$unit" =~ ^[a-zA-Z0-9@._\\-]+(\.(service|socket|timer|target|mount|path))?$ ]] \
+        || die "bad unit: $unit"
+    systemctl --root="$target" enable "$unit"
+}
+
+cmd_create_user() {
+    local target="$1" user="$2" wheel="$3"
+    is_abs_path "$target" || die "bad target: $target"
+    [[ "$user" =~ ^[a-z_][a-z0-9_-]{0,30}$ ]] || die "bad user: $user"
+    arch-chroot "$target" useradd -m -s /bin/bash "$user"
+    if [[ "$wheel" == "wheel-yes" || "$wheel" == "wheel-true" ]]; then
+        arch-chroot "$target" usermod -aG wheel "$user"
+        # Grant wheel sudo (uncomment the %wheel line).
+        sed -i 's/^# *%wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' \
+            "$target/etc/sudoers"
+    fi
+}
+
+cmd_copy_wilai_state() {
+    local target="$1"
+    is_abs_path "$target" || die "bad target: $target"
+    install -d -m 0750 -o root -g root "$target/var/lib/wilai"
+    if [[ -d /var/lib/wilai ]]; then
+        # -a preserves perms, -x stays on one filesystem, --exclude keeps
+        # the wizard markers out of the installed system.
+        rsync -ax --exclude='wizard-pending' --exclude='install-pending' \
+            /var/lib/wilai/ "$target/var/lib/wilai/"
+    fi
+}
+
+main() {
+    [[ $# -ge 1 ]] || { usage; exit 1; }
+    local sub="$1"; shift
+    case "$sub" in
+        format)                   cmd_format                "$@" ;;
+        mount-target)             cmd_mount_target          "$@" ;;
+        mount-esp)                cmd_mount_esp             "$@" ;;
+        genfstab)                 cmd_genfstab              "$@" ;;
+        pacstrap)                 cmd_pacstrap              "$@" ;;
+        chroot-exec)              cmd_chroot_exec           "$@" ;;
+        bootloader-grub-efi)      cmd_bootloader_grub_efi   "$@" ;;
+        bootloader-systemd-boot)  cmd_bootloader_systemd_boot "$@" ;;
+        enable-service)           cmd_enable_service        "$@" ;;
+        create-user)              cmd_create_user           "$@" ;;
+        copy-wilai-state)         cmd_copy_wilai_state      "$@" ;;
+        -h|--help|help)           usage ;;
+        *)                        usage; exit 1 ;;
+    esac
+}
+
+main "$@"

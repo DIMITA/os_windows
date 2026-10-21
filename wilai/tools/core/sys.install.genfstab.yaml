@@ -1,0 +1,32 @@
+name: sys.install.genfstab
+version: 1
+description: Generate /etc/fstab inside the mounted target using genfstab (UUID-based entries).
+category: privileged
+risk: medium
+
+inputs:
+  target:
+    type: string
+    required: false
+    default: "/mnt"
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Install root.
+
+guards:
+  - if: "always()"
+    confirm: "Write {target}/etc/fstab?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-install", "genfstab", "{target}"]
+  timeout_s: 15
+  output:
+    capture: both
+    max_bytes: 8192
+
+audit:
+  fields: [target]
+
+examples:
+  - args: { target: "/mnt" }
+    note: "Write /mnt/etc/fstab from the currently-mounted layout."
