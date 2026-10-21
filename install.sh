@@ -31,6 +31,10 @@ ok()   { printf "${C_GREEN}✓${C_RST} %s\n" "$*"; }
 warn() { printf "${C_YELLOW}!${C_RST} %s\n" "$*" >&2; }
 die()  { printf "${C_RED}✗${C_RST} %s\n" "$*" >&2; exit 1; }
 
+# Loud failure trap. Without this, `set -e` kills the script silently
+# and the user is left wondering what happened.
+trap 'ec=$?; printf "\n${C_RED}✗${C_RST} install.sh died at line ${LINENO} (exit ${ec}). Scroll up for the last message, or re-run with:\n  curl -fsSL ... | sudo bash -x\n" >&2' ERR
+
 #─── preflight ────────────────────────────────────────────────────
 [ "$(id -u)" -eq 0 ] || die "run this with sudo:  curl -fsSL … | sudo sh"
 
@@ -65,14 +69,25 @@ if command -v ollama >/dev/null 2>&1; then
     ok "ollama already present ($(ollama --version 2>&1 | head -1))"
 else
     say "Installing Ollama (local LLM runtime)..."
-    curl -fsSL https://ollama.com/install.sh | sh >/dev/null
+    # Ollama's installer sometimes exits non-zero on harmless warnings
+    # (e.g. "useradd: group ollama exists") even when Ollama is in fact
+    # installed. Don't let that kill the whole install — we verify
+    # Ollama is actually answering below.
+    curl -fsSL https://ollama.com/install.sh | sh >/dev/null 2>&1 || true
     systemctl enable --now ollama >/dev/null 2>&1 || true
-    # Wait for it to answer.
-    for _ in $(seq 1 20); do
-        curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1 && break
+    # Wait for it to answer, up to 30 seconds.
+    ollama_up=0
+    for _ in $(seq 1 30); do
+        if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            ollama_up=1; break
+        fi
         sleep 1
     done
-    ok "ollama installed and running"
+    if [ "$ollama_up" = 1 ]; then
+        ok "ollama installed and running"
+    else
+        die "ollama installed but is not answering on 127.0.0.1:11434. Try: sudo systemctl status ollama"
+    fi
 fi
 
 #─── 3. Wilai .deb (prebuilt from GitHub Releases) ───────────────
