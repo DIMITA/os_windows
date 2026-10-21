@@ -54,6 +54,24 @@ watch_mounts      = ["/"]
 watch_processes   = []
 process_poll_s    = 30
 
+[remotes]
+# Federation: named SSH endpoints that run their own wilai-daemon.
+# `remote.wilai.exec` and `remote.wilai.read` tools target these by
+# name. Each remote has its own audit log and its own confirms — this
+# is federation, not control. SSH authentication reuses the user's
+# ~/.ssh/config and keys.
+#
+# [remotes.homelab]
+# ssh         = "nora@homelab.lan"
+# description = "The Arch box in the office"
+# socket      = "/run/wilai.sock"
+# allow_in_pentest = false
+#
+# [remotes.vps]
+# ssh         = "root@vps.example.com"
+# description = "Scaleway VPS"
+# socket      = "/run/wilai.sock"
+
 [voice]
 # Local voice I/O for wilai-shell. All engines are subprocesses so this
 # section is a no-op if they aren't installed. Set enabled = true (or

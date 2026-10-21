@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# wilai-remote — thin SSH bridge to a remote wilai-daemon's unix socket.
+# Called by remote.wilai.exec and remote.wilai.read.
+#
+# Usage:
+#   wilai-remote exec <ssh-target> <socket> <prompt>
+#       Send <prompt> to the remote daemon as one turn, stream the
+#       resulting text back on stdout. Exits 0 on TurnDone, 1 otherwise.
+#   wilai-remote read <ssh-target> <socket> <query>
+#       Shortcut for a read-only prompt: wraps <query> with an instruction
+#       to use only `read` category tools on the remote.
+#
+# The remote daemon must have the local-only lock (security.local_only)
+# honored on its end; this script is just transport.
+
+set -euo pipefail
+
+cmd="${1:-}"
+target="${2:-}"
+socket="${3:-}"
+shift 3 || true
+query="$*"
+
+if [[ -z "$cmd" || -z "$target" || -z "$socket" || -z "$query" ]]; then
+    cat <<'EOF' >&2
+Usage: wilai-remote exec <ssh-target> <socket> <prompt>
+       wilai-remote read <ssh-target> <socket> <query>
+EOF
+    exit 2
+fi
+
+if [[ "$cmd" == "read" ]]; then
+    prompt="Answer in one paragraph using only category=read tools on \
+this machine: $query"
+else
+    prompt="$query"
+fi
+
+# Build the two JSON lines we need to send on the remote socket, then
+# pipe them through socat (or busybox nc -U fallback).
+json_prompt=$(printf '%s' "$prompt" | python3 -c '
+import json, sys
+print(json.dumps({"op": "prompt", "text": sys.stdin.read()}))
+') || {
+    echo "wilai-remote: python3 required to encode the prompt" >&2
+    exit 2
+}
+
+ssh -o ConnectTimeout=10 -o BatchMode=yes "$target" \
+    "sh -c 'cat | socat - UNIX-CONNECT:${socket}'" <<EOF
+${json_prompt}
+{"op":"quit"}
+EOF

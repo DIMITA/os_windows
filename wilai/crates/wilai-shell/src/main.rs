@@ -214,6 +214,15 @@ Keep each step short. Do not run the next step until the previous one \
 succeeded.
 ";
 
+const REMOTES_SEED: &str = "\
+[REMOTES]
+List the federated Wilai instances declared in [remotes]. For each \
+one, show its name, description and SSH target. If none are declared, \
+tell the user how to add one (see the [remotes] section in \
+/usr/share/wilai/wilai.toml.example). Then offer to reach out to one \
+with remote.wilai.read.
+";
+
 const UPDATE_SEED: &str = "\
 [SELF-UPDATE]
 The user wants to upgrade Wilai itself. Call sys.wilai.update first \
@@ -575,6 +584,13 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
                 app.set_face(FaceState::Thinking);
                 app.busy = true;
                 return Some(KeyAction::SendPrompt(UPDATE_SEED.to_string()));
+            }
+            if text == "/remotes" {
+                app.push(Who::You, text.clone());
+                app.push(Who::System, "listing federated Wilai instances…");
+                app.set_face(FaceState::Thinking);
+                app.busy = true;
+                return Some(KeyAction::SendPrompt(REMOTES_SEED.to_string()));
             }
             app.push(Who::You, text.clone());
             app.set_face(FaceState::Thinking);

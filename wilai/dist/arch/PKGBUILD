@@ -17,6 +17,9 @@ optdepends=(
     'nmap: pentest tool driven by tools/pentest/nmap.scan.yaml'
     'nuclei: pentest tool driven by tools/pentest/nuclei.run.yaml'
     'whatweb: pentest tool driven by tools/pentest/whatweb.scan.yaml'
+    'openssh: ssh client used by remote.wilai.* federation tools'
+    'socat: unix-socket bridge used by remote.wilai.* federation tools'
+    'python: json encoder used by scripts/wilai-remote'
 )
 makedepends=('rust' 'cargo')
 source=()
@@ -43,6 +46,8 @@ package() {
     install -Dm755 scripts/wilai-install         "$pkgdir/usr/bin/wilai-install"
     # Self-update helper — called by sys.wilai.update.
     install -Dm755 scripts/wilai-selfupdate      "$pkgdir/usr/bin/wilai-selfupdate"
+    # Federation helper — called by remote.wilai.* YAML tools.
+    install -Dm755 scripts/wilai-remote          "$pkgdir/usr/bin/wilai-remote"
     # Assets: the robot face used by the HUD overlay.
     install -Dm644 assets/wilai-face.png         "$pkgdir/usr/share/wilai/assets/wilai-face.png"
 

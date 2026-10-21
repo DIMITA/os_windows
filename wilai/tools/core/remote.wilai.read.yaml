@@ -1,0 +1,35 @@
+name: remote.wilai.read
+version: 1
+description: Read-only variant of remote.wilai.exec. Wraps the prompt with an instruction telling the remote Wilai to use only category=read tools, so this call cannot mutate the remote side even if the LLM gets creative.
+category: network
+risk: low
+
+inputs:
+  remote:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9_\\-]+$"
+    description: Short name of the remote from the [remotes] config section.
+  query:
+    type: string
+    required: true
+    description: Question for the remote Wilai (read-only context).
+
+guards:
+  - if: "always()"
+    confirm: "Ask remote `{remote}` a read-only question?"
+
+executor:
+  type: subprocess
+  cmd: ["wilai-remote", "read", "{remote}", "/run/wilai.sock", "{query}"]
+  timeout_s: 120
+  output:
+    capture: both
+    max_bytes: 32768
+
+audit:
+  fields: [remote, query]
+
+examples:
+  - args: { remote: "vps", query: "which services are running?" }
+    note: "List services on the VPS without changing anything."

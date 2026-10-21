@@ -25,6 +25,12 @@ pub struct Config {
     pub voice: VoiceConfig,
     #[serde(default)]
     pub proactivity: ProactivityConfig,
+    /// Named remote Wilai instances reachable over SSH. Each entry
+    /// pairs a short name (e.g. "homelab", "vps") with the SSH target
+    /// so the remote.* tool family can address them symbolically
+    /// instead of asking the LLM to remember hostnames.
+    #[serde(default)]
+    pub remotes: BTreeMap<String, RemoteConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,6 +205,28 @@ fn default_disk_poll() -> u32 { 60 }
 fn default_disk_threshold() -> u32 { 10 }
 fn default_process_poll() -> u32 { 30 }
 
+/// SSH endpoint for a federated Wilai instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RemoteConfig {
+    /// SSH destination (user@host or an alias from ~/.ssh/config).
+    pub ssh: String,
+    /// Human description shown by `/remotes`.
+    #[serde(default)]
+    pub description: String,
+    /// Socket path on the remote side where its wilai-daemon listens.
+    /// Default: /run/wilai.sock (the WilOS-Core system path).
+    #[serde(default = "default_remote_socket")]
+    pub socket: String,
+    /// Allow this remote in Pentest mode. Off by default — pentest
+    /// should not fan out to other machines accidentally.
+    #[serde(default)]
+    pub allow_in_pentest: bool,
+}
+
+fn default_remote_socket() -> String {
+    "/run/wilai.sock".to_string()
+}
+
 impl Default for ProactivityConfig {
     fn default() -> Self {
         Self {
@@ -258,6 +286,7 @@ impl Default for Config {
             persona: PersonaConfig::default(),
             voice: VoiceConfig::default(),
             proactivity: ProactivityConfig::default(),
+            remotes: BTreeMap::new(),
         }
     }
 }

@@ -1,0 +1,35 @@
+name: remote.wilai.exec
+version: 1
+description: Send a prompt to another Wilai instance over SSH and stream the result back. The remote machine must be declared in [remotes] in config. Each remote has its own daemon, its own audit log, and its own confirms — this is federation, not control.
+category: network
+risk: high
+
+inputs:
+  remote:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9_\\-]+$"
+    description: Short name of the remote from the [remotes] config section.
+  prompt:
+    type: string
+    required: true
+    description: Natural-language instruction to send to the remote Wilai.
+
+guards:
+  - if: "always()"
+    confirm: "Send a prompt to remote `{remote}`? It runs with its own confirms on the far side."
+
+executor:
+  type: subprocess
+  cmd: ["wilai-remote", "exec", "{remote}", "/run/wilai.sock", "{prompt}"]
+  timeout_s: 300
+  output:
+    capture: both
+    max_bytes: 65536
+
+audit:
+  fields: [remote, prompt]
+
+examples:
+  - args: { remote: "homelab", prompt: "run sys.disk.list and tell me how full /home is" }
+    note: "Query a homelab from a laptop."
