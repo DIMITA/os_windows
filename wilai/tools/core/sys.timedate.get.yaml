@@ -1,0 +1,22 @@
+name: sys.timedate.get
+version: 1
+description: Current date, time, timezone, and NTP sync state via timedatectl.
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["timedatectl", "--no-pager", "status"]
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 4096
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "What timezone am I on, is NTP synced?"

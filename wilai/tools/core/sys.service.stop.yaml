@@ -1,0 +1,31 @@
+name: sys.service.stop
+version: 1
+description: Stop a running systemd service.
+category: privileged
+risk: medium
+
+inputs:
+  unit:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9@._\\-]+(\\.(service|socket|timer|target|mount|path))?$"
+    description: Unit to stop.
+
+guards:
+  - if: "always()"
+    confirm: "Stop {unit}?"
+
+executor:
+  type: subprocess
+  cmd: ["systemctl", "stop", "{unit}"]
+  timeout_s: 30
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [unit]
+
+examples:
+  - args: { unit: "cups.service" }
+    note: "Stop the printing daemon."

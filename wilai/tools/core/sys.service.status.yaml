@@ -1,0 +1,29 @@
+name: sys.service.status
+version: 1
+description: Report the status of a systemd service (active, enabled, PID, uptime).
+category: read
+risk: none
+
+inputs:
+  unit:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9@._\\-]+(\\.(service|socket|timer|target|mount|path))?$"
+    description: Unit name (e.g. "NetworkManager" or "wilai-daemon.service").
+
+executor:
+  type: subprocess
+  cmd: ["systemctl", "--no-pager", "status", "{unit}"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 16384
+
+audit:
+  fields: [unit]
+
+examples:
+  - args: { unit: "NetworkManager" }
+    note: "Check whether NetworkManager is running."
+  - args: { unit: "wilai-daemon.service" }
+    note: "Check Wilai's own daemon."

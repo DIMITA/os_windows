@@ -1,0 +1,35 @@
+name: sys.service.list
+version: 1
+description: List systemd units, optionally filtered by state (running, failed, enabled) or unit-file glob.
+category: read
+risk: none
+
+inputs:
+  state:
+    type: enum
+    required: false
+    values: [running, failed, exited, listening, active, inactive, all]
+    default: running
+    description: Filter by LOAD/ACTIVE/SUB state. "all" lists every unit.
+  pattern:
+    type: string
+    required: false
+    pattern: "^[a-zA-Z0-9@._*?\\-]+$"
+    description: Optional unit-name glob (e.g. "wilai-*").
+
+executor:
+  type: subprocess
+  cmd: ["systemctl", "--no-pager", "--no-legend", "list-units", "--type=service", "--state={state}", "{pattern}"]
+  timeout_s: 10
+  output:
+    capture: stdout
+    max_bytes: 65536
+
+audit:
+  fields: [state, pattern]
+
+examples:
+  - args: { state: "running" }
+    note: "What services are running right now?"
+  - args: { state: "failed" }
+    note: "What services have failed since boot?"

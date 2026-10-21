@@ -1,0 +1,29 @@
+[Unit]
+Description=Wilai system agent daemon (WilOS-Core, system-wide)
+Documentation=https://github.com/dimita/os_windows
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# On WilOS-Core, the daemon runs as the primary user (set by the wizard
+# or by the user-created account). The service template below is
+# templated per-user via wilai-daemon@<user>.service; this plain unit is
+# the system-wide fallback that drives tty1 before any user exists.
+ExecStart=/usr/bin/wilai-daemon --log info --socket /run/wilai.sock
+Restart=on-failure
+RestartSec=2
+# System socket is world-unreachable (owned root:wheel 0660). The shell
+# runs as root on the live ISO, as the created user after setup.
+RuntimeDirectory=wilai
+RuntimeDirectoryMode=0750
+StateDirectory=wilai
+StateDirectoryMode=0750
+NoNewPrivileges=true
+# The agent needs to invoke systemctl, pacman, nmcli, hostnamectl,
+# useradd, mount — so we deliberately do NOT lock the filesystem down
+# with ProtectSystem=strict here. The guards + confirms are the trust
+# boundary. Audit log and memory DB live under /var/lib/wilai.
+
+[Install]
+WantedBy=multi-user.target

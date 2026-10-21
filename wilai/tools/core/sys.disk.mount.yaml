@@ -1,0 +1,42 @@
+name: sys.disk.mount
+version: 1
+description: Mount a block device at a target directory. Creates target if missing.
+category: privileged
+risk: medium
+
+inputs:
+  device:
+    type: string
+    required: true
+    pattern: "^/dev/[a-zA-Z0-9/\\-_]+$"
+    description: Block device path (e.g. /dev/sda1).
+  target:
+    type: string
+    required: true
+    pattern: "^/[a-zA-Z0-9/._\\-]*$"
+    description: Target directory.
+  readonly:
+    type: boolean
+    default: false
+    description: Mount read-only.
+
+guards:
+  - if: "arg_true(readonly)"
+    confirm: "Mount {device} read-only at {target}?"
+  - if: "not arg_true(readonly)"
+    confirm: "Mount {device} read-write at {target}?"
+
+executor:
+  type: subprocess
+  cmd: ["mount", "{device}", "{target}"]
+  timeout_s: 15
+  output:
+    capture: both
+    max_bytes: 2048
+
+audit:
+  fields: [device, target, readonly]
+
+examples:
+  - args: { device: "/dev/sdb1", target: "/mnt/usb" }
+    note: "Mount a USB stick."

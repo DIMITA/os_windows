@@ -1,0 +1,36 @@
+name: sys.net.wifi_connect
+version: 1
+description: Connect to a Wi-Fi SSID via NetworkManager. Password is stored in NM's keyring.
+category: privileged
+risk: low
+
+inputs:
+  ssid:
+    type: string
+    required: true
+    description: Network SSID.
+  password:
+    type: string
+    required: false
+    description: WPA/WPA2 password. Omit for open networks.
+
+guards:
+  - if: "always()"
+    confirm: "Connect to Wi-Fi \"{ssid}\"?"
+
+executor:
+  type: subprocess
+  cmd: ["nmcli", "device", "wifi", "connect", "{ssid}", "password", "{password}"]
+  timeout_s: 45
+  output:
+    capture: both
+    max_bytes: 4096
+    redact: [password]
+
+audit:
+  fields: [ssid]
+  redact: [password]
+
+examples:
+  - args: { ssid: "homenet", password: "s3cr3t" }
+    note: "Join homenet."

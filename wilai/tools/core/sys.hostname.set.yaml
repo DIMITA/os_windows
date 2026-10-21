@@ -1,0 +1,31 @@
+name: sys.hostname.set
+version: 1
+description: Set the system hostname (both static and transient) via hostnamectl.
+category: privileged
+risk: low
+
+inputs:
+  hostname:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9][a-zA-Z0-9\\-]{0,62}$"
+    description: New hostname.
+
+guards:
+  - if: "always()"
+    confirm: "Set hostname to \"{hostname}\"?"
+
+executor:
+  type: subprocess
+  cmd: ["hostnamectl", "set-hostname", "{hostname}"]
+  timeout_s: 5
+  output:
+    capture: both
+    max_bytes: 1024
+
+audit:
+  fields: [hostname]
+
+examples:
+  - args: { hostname: "wilos-dev" }
+    note: "Rename the machine."

@@ -1,0 +1,31 @@
+name: sys.service.enable
+version: 1
+description: Enable a systemd service so it starts on boot, and start it immediately. For transient start without changing boot state, use sys.service.start.
+category: privileged
+risk: medium
+
+inputs:
+  unit:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9@._\\-]+(\\.(service|socket|timer|target|mount|path))?$"
+    description: Unit to enable.
+
+guards:
+  - if: "always()"
+    confirm: "Enable {unit} on boot and start it now?"
+
+executor:
+  type: subprocess
+  cmd: ["systemctl", "enable", "--now", "{unit}"]
+  timeout_s: 30
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [unit]
+
+examples:
+  - args: { unit: "NetworkManager" }
+    note: "Enable NetworkManager so it survives reboot and start it now."

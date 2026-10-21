@@ -1,0 +1,39 @@
+name: sys.pkg.install
+version: 1
+description: Install one or more packages via pacman. Requires network.
+category: privileged
+risk: high
+
+inputs:
+  packages:
+    type: array
+    required: true
+    items: { type: string, pattern: "^[a-zA-Z0-9._+\\-]+$" }
+    description: Package names.
+  sync_first:
+    type: boolean
+    default: false
+    description: Run "pacman -Syy" before install to refresh databases.
+
+guards:
+  - if: "arg_true(sync_first)"
+    confirm: "Refresh pacman databases and install {packages}? (requires network)"
+  - if: "not arg_true(sync_first)"
+    confirm: "Install {packages}? (uses cached pacman database)"
+
+executor:
+  type: subprocess
+  cmd: ["pacman", "-S", "--noconfirm", "--needed", "{packages}"]
+  timeout_s: 1800
+  output:
+    capture: both
+    max_bytes: 262144
+
+audit:
+  fields: [packages, sync_first]
+
+examples:
+  - args: { packages: ["firefox"] }
+    note: "Install Firefox."
+  - args: { packages: ["htop", "neovim"], sync_first: true }
+    note: "Refresh dbs then install multiple packages."

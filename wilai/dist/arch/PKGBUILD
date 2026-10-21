@@ -2,7 +2,7 @@
 pkgname=wilai
 pkgver=0.9.0
 pkgrel=1
-pkgdesc="Wilai system agent for WilOS Aurora: typed-tool LLM driver with hash-chained audit"
+pkgdesc="Wilai system agent for WilOS (Aurora desktop + Core headless): typed-tool LLM driver with hash-chained audit"
 arch=('x86_64')
 url='https://github.com/dimita/os_windows'
 license=('MIT' 'Apache')
@@ -35,6 +35,7 @@ package() {
     cd "$startdir/../.."
     install -Dm755 target/release/wilai          "$pkgdir/usr/bin/wilai"
     install -Dm755 target/release/wilai-daemon   "$pkgdir/usr/bin/wilai-daemon"
+    install -Dm755 target/release/wilai-shell    "$pkgdir/usr/bin/wilai-shell"
     install -Dm755 target/release/wilai-voice    "$pkgdir/usr/bin/wilai-voice"
     install -Dm755 target/release/wilai-overlay  "$pkgdir/usr/bin/wilai-overlay"
 
@@ -51,6 +52,12 @@ package() {
         "$pkgdir/usr/share/wilai/mcp-examples.toml"
     install -Dm644 dist/systemd/wilai.service \
         "$pkgdir/usr/lib/systemd/user/wilai.service"
+
+    # WilOS-Core system units (installed, enabled by the ISO profile).
+    install -Dm644 dist/arch/releng-core/airootfs/etc/systemd/system/wilai-daemon.service \
+        "$pkgdir/usr/lib/systemd/system/wilai-daemon.service"
+    install -Dm644 dist/arch/releng-core/airootfs/etc/systemd/system/wilai-shell.service \
+        "$pkgdir/usr/lib/systemd/system/wilai-shell.service"
 
     # Docs.
     install -Dm644 README.md           "$pkgdir/usr/share/doc/wilai/README.md"

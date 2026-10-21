@@ -1,0 +1,47 @@
+name: sys.user.add
+version: 1
+description: Create a system user with a home directory. Optionally add to wheel for sudo.
+category: privileged
+risk: high
+
+inputs:
+  username:
+    type: string
+    required: true
+    pattern: "^[a-z_][a-z0-9_\\-]{0,30}$"
+    description: Login name (POSIX).
+  full_name:
+    type: string
+    required: false
+    description: GECOS field (display name).
+  shell:
+    type: string
+    required: false
+    default: "/bin/bash"
+    pattern: "^/[^\\s]+$"
+    description: Login shell path.
+  wheel:
+    type: boolean
+    default: false
+    description: Add the user to the wheel group (sudo access).
+
+guards:
+  - if: "arg_true(wheel)"
+    confirm: "Create user \"{username}\" with sudo access (wheel)?"
+  - if: "not arg_true(wheel)"
+    confirm: "Create user \"{username}\" without sudo?"
+
+executor:
+  type: subprocess
+  cmd: ["useradd", "-m", "-s", "{shell}", "-c", "{full_name}", "{username}"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 2048
+
+audit:
+  fields: [username, full_name, shell, wheel]
+
+examples:
+  - args: { username: "nora", full_name: "Nora H.", wheel: true }
+    note: "Primary user with sudo."

@@ -1,0 +1,31 @@
+name: sys.locale.set
+version: 1
+description: Set the system locale via localectl.
+category: privileged
+risk: low
+
+inputs:
+  locale:
+    type: string
+    required: true
+    pattern: "^[a-z]{2,3}_[A-Z]{2}(\\.[A-Za-z0-9\\-]+)?$"
+    description: Locale identifier (e.g. en_US.UTF-8, fr_FR.UTF-8).
+
+guards:
+  - if: "always()"
+    confirm: "Set system locale to {locale}?"
+
+executor:
+  type: subprocess
+  cmd: ["localectl", "set-locale", "LANG={locale}"]
+  timeout_s: 10
+  output:
+    capture: both
+    max_bytes: 1024
+
+audit:
+  fields: [locale]
+
+examples:
+  - args: { locale: "fr_FR.UTF-8" }
+    note: "Switch to French."

@@ -1,0 +1,37 @@
+name: sys.pkg.remove
+version: 1
+description: Remove installed packages via pacman. Pacman refuses to remove packages that are depended on.
+category: privileged
+risk: high
+
+inputs:
+  packages:
+    type: array
+    required: true
+    items: { type: string, pattern: "^[a-zA-Z0-9._+\\-]+$" }
+    description: Package names to remove.
+  cascade:
+    type: boolean
+    default: false
+    description: Also remove packages that depend on these (destructive).
+
+guards:
+  - if: "arg_true(cascade)"
+    confirm: "Remove {packages} AND every package depending on them? Destructive."
+  - if: "not arg_true(cascade)"
+    confirm: "Remove {packages}?"
+
+executor:
+  type: subprocess
+  cmd: ["pacman", "-R", "--noconfirm", "{packages}"]
+  timeout_s: 600
+  output:
+    capture: both
+    max_bytes: 65536
+
+audit:
+  fields: [packages, cascade]
+
+examples:
+  - args: { packages: ["cups"] }
+    note: "Remove CUPS printing stack."

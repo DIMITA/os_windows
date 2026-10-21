@@ -1,0 +1,22 @@
+name: sys.net.wifi_scan
+version: 1
+description: Scan for nearby Wi-Fi networks via NetworkManager and return SSID, signal, and security.
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["nmcli", "-t", "-f", "SSID,SIGNAL,SECURITY,IN-USE", "device", "wifi", "list", "--rescan", "yes"]
+  timeout_s: 15
+  output:
+    capture: stdout
+    max_bytes: 32768
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "What Wi-Fi networks are around?"

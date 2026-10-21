@@ -1,0 +1,31 @@
+name: sys.service.start
+version: 1
+description: Start a systemd service (one-shot). Does not change enabled state.
+category: privileged
+risk: medium
+
+inputs:
+  unit:
+    type: string
+    required: true
+    pattern: "^[a-zA-Z0-9@._\\-]+(\\.(service|socket|timer|target|mount|path))?$"
+    description: Unit to start.
+
+guards:
+  - if: "always()"
+    confirm: "Start {unit} now?"
+
+executor:
+  type: subprocess
+  cmd: ["systemctl", "start", "{unit}"]
+  timeout_s: 20
+  output:
+    capture: both
+    max_bytes: 4096
+
+audit:
+  fields: [unit]
+
+examples:
+  - args: { unit: "NetworkManager" }
+    note: "Start NetworkManager."

@@ -1,0 +1,32 @@
+[Unit]
+Description=Wilai TUI shell on tty1 (WilOS-Core primary interface)
+After=wilai-daemon.service systemd-user-sessions.service
+Wants=wilai-daemon.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+# Replace getty on tty1 — the whole point of WilOS-Core is that there
+# is no login prompt, just Wilai.
+Before=graphical.target
+
+[Service]
+Type=idle
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+# Run as root on the live ISO; the installer flips this to the primary
+# user via `systemctl edit wilai-shell.service` once a user exists.
+User=root
+Environment=TERM=linux-16color
+# Point explicitly at the system socket.
+ExecStart=/usr/bin/wilai-shell --socket /run/wilai.sock
+Restart=always
+RestartSec=1
+UtmpIdentifier=tty1
+UtmpMode=user
+
+[Install]
+WantedBy=multi-user.target

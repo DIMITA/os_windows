@@ -1,0 +1,78 @@
+# WilOS-Core package set. Strictly server-grade: NO X, NO Wayland,
+# NO compositor. Wilai is the interface.
+
+# Base
+base
+base-devel
+linux
+linux-firmware
+intel-ucode
+amd-ucode
+
+# Boot / live-media essentials
+arch-install-scripts
+syslinux
+grub
+efibootmgr
+dosfstools
+btrfs-progs
+e2fsprogs
+xfsprogs
+f2fs-tools
+mtools
+squashfs-tools
+edk2-shell
+
+# Networking
+networkmanager
+iwd
+wpa_supplicant
+openssh
+dhcpcd
+openresolv
+mobile-broadband-provider-info
+modemmanager
+
+# Audio stack (Wilai voice I/O)
+pipewire
+pipewire-pulse
+pipewire-alsa
+wireplumber
+alsa-utils
+
+# Shell / term essentials
+bash
+bash-completion
+sudo
+less
+vim
+nano
+tmux
+htop
+tree
+curl
+wget
+rsync
+git
+
+# Hardware helpers
+usbutils
+pciutils
+smartmontools
+lshw
+lm_sensors
+
+# Virtualization / container helpers (optional on live)
+qemu-guest-agent
+
+# Local LLM runtime
+ollama
+
+# Voice stack: whisper.cpp + piper are optional on the ISO. Users
+# install them post-install if they want voice. Leave hooks only.
+# whisper.cpp
+# piper
+
+# Wilai itself (installed from the in-tree PKGBUILD at build time;
+# see customize_airootfs.sh).
+# wilai

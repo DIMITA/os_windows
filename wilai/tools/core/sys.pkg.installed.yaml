@@ -1,0 +1,37 @@
+name: sys.pkg.installed
+version: 1
+description: Query installed pacman packages, optionally by name fragment.
+category: read
+risk: none
+
+inputs:
+  query:
+    type: string
+    required: false
+    default: ""
+    pattern: "^[a-zA-Z0-9._+\\-]*$"
+    description: Optional package-name fragment. Empty lists everything (large).
+
+executor:
+  type: subprocess
+  cmd: ["pacman", "-Qs", "{query}"]
+  timeout_s: 15
+  output:
+    capture: stdout
+    max_bytes: 131072
+  sandbox:
+    kind: bwrap
+    bind_ro:
+      - /usr
+      - /etc
+      - /var/lib/pacman
+    network: false
+
+audit:
+  fields: [query]
+
+examples:
+  - args: { query: "hyprland" }
+    note: "Is hyprland installed, which version?"
+  - args: {}
+    note: "List all installed packages."

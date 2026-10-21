@@ -1,0 +1,31 @@
+name: sys.disk.list
+version: 1
+description: List block devices (disks, partitions, LVM, loop) with size, filesystem type, and mountpoint.
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["lsblk", "-J", "-o", "NAME,SIZE,TYPE,FSTYPE,LABEL,MOUNTPOINT,RO,RM"]
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 32768
+  sandbox:
+    kind: bwrap
+    bind_ro:
+      - /usr
+      - /etc
+      - /sys
+      - /proc
+      - /dev
+    network: false
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "What disks and partitions does the machine have?"

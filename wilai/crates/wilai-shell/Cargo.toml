@@ -1,0 +1,26 @@
+[package]
+name = "wilai-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Wilai TUI shell. Full-screen frontend that runs on tty and makes Wilai the primary interface to the system."
+
+[[bin]]
+name = "wilai-shell"
+path = "src/main.rs"
+
+[dependencies]
+wilai-core = { path = "../wilai-core" }
+wilai-daemon = { path = "../wilai-daemon" }
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true }
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+time = { workspace = true }
+crossterm = "0.28"
+ratatui = { version = "0.29", default-features = false, features = ["crossterm"] }
+dirs.workspace = true

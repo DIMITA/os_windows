@@ -1,0 +1,22 @@
+name: sys.net.status
+version: 1
+description: Report the current network state via NetworkManager (connections, interface addresses, default route).
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device"]
+  timeout_s: 5
+  output:
+    capture: stdout
+    max_bytes: 8192
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "Am I connected to the network?"

@@ -1,0 +1,22 @@
+name: sys.locale.list
+version: 1
+description: List available locales on the system.
+category: read
+risk: none
+
+inputs: {}
+
+executor:
+  type: subprocess
+  cmd: ["localectl", "--no-pager", "list-locales"]
+  timeout_s: 10
+  output:
+    capture: stdout
+    max_bytes: 65536
+
+audit:
+  fields: []
+
+examples:
+  - args: {}
+    note: "Which locales can I switch to?"
