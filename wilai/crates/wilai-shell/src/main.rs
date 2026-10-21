@@ -667,8 +667,8 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
 }
 
 const HELP_TEXT: &str = "\
-Wilai shell — slash commands + keybinds
-───────────────────────────────────────
+Wilai shell — commands, keybinds, workflows
+───────────────────────────────────────────
 Slash commands (type at the prompt and hit Enter):
   /help, ?       show this card
   /wizard        re-run the first-boot setup (locale, wifi, user, …)
@@ -680,7 +680,7 @@ Slash commands (type at the prompt and hit Enter):
 Keybinds:
   Enter          send prompt
   Up / Down      recall previous / newer prompt from history
-  Esc            cancel history recall, restore what you were typing
+  Esc            cancel history recall / dismiss a confirm
   Backspace      delete char
   PgUp / PgDn    scroll the conversation
   F2             push-to-talk (voice I/O must be enabled)
@@ -688,9 +688,29 @@ Keybinds:
   Ctrl+C         quit
   Ctrl+D         quit (when the input is empty)
 
-Tool catalogue is Wilai's business — just ask in natural language and \
-Wilai picks the right tool, confirming each destructive step. Ask \
-'what tools do you have?' to see the live list.\
+Natural-language workflows — just ask, Wilai picks the tool:
+  System       'what services are running?', 'disk list', 'wifi scan',
+               'install the firefox package', 'restart nginx'
+  Memory       'remember that my DB host is db.lan', 'what do you know
+               about X?', 'recall notes about ssh config'
+  Vision       'take a screenshot and describe it'
+               (desktop only, forbidden in pentest mode)
+  Federation   'ask homelab what services are running'
+               (needs a [remotes] entry; see /remotes)
+
+Pentest project (requires 'enter pentest mode' first):
+  'start a pentest project named acme-webapp as a webapp engagement'
+  'pin the authz document at /path/to/engagement.pdf'
+  'add scope allow for the domain *.acme-stage.example'
+  'is 10.1.5.5 in scope?'
+  'run nmap on acme-stage.example'            (scope-checked)
+  'add a critical finding: pre-auth RCE in /upload, CVSS vector
+   AV:N/AC:L/PR:N/UI:N/S:C/C:H/I:H/A:H'
+  'move finding <id> to confirmed'
+  'render the report'
+  'close the project'
+
+Ask 'what tools do you have?' to see the live tool list.\
 ";
 
 async fn dispatch_action(
