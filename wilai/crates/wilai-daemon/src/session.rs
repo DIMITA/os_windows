@@ -21,6 +21,26 @@ const MAX_TOOL_TURNS: usize = 8;
 const MAX_REPAIR_TURNS: usize = 2;
 
 pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()> {
+    // Resolve the session role from the peer uid of the socket. RBAC
+    // is opt-in: when rbac.enabled is false, every session is admin,
+    // which matches the pre-v5.2 behavior.
+    let role: String = if service.cfg.rbac.enabled {
+        match stream.peer_cred() {
+            Ok(cred) => {
+                let uid = cred.uid();
+                let r = service.cfg.rbac.role_for(uid);
+                let normalized = crate::rbac::normalize_role(r);
+                tracing::info!(uid, role = normalized, "session role resolved");
+                normalized.to_string()
+            }
+            Err(e) => {
+                tracing::warn!("peer_cred failed: {e}; falling back to guest");
+                "guest".to_string()
+            }
+        }
+    } else {
+        "admin".to_string()
+    };
     let (read_half, write_half) = stream.into_split();
     let (event_tx, mut event_rx) = mpsc::channel::<ServerEvent>(32);
     let pending = Arc::new(PendingConfirms::default());
@@ -252,7 +272,7 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                         continue;
                     }
                 };
-                if let Err(e) = run_turn(
+                if let Err(e) = run_turn_with_role(
                     &service,
                     &session_id,
                     &system_prompt,
@@ -262,6 +282,7 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
                     &model,
                     &*confirmer,
                     &event_tx,
+                    &role,
                 )
                 .await
                 {
@@ -347,6 +368,25 @@ pub async fn run_turn(
     confirmer: &dyn Confirmer,
     event_tx: &mpsc::Sender<ServerEvent>,
 ) -> Result<()> {
+    run_turn_with_role(
+        service, session_id, system_prompt, history, user_text,
+        provider, model, confirmer, event_tx, "admin",
+    ).await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_turn_with_role(
+    service: &Service,
+    session_id: &str,
+    system_prompt: &str,
+    history: &mut Vec<Message>,
+    user_text: String,
+    provider: &dyn Provider,
+    model: &str,
+    confirmer: &dyn Confirmer,
+    event_tx: &mpsc::Sender<ServerEvent>,
+    role: &str,
+) -> Result<()> {
     history.push(Message {
         role: MessageRole::User,
         content: user_text,
@@ -356,7 +396,10 @@ pub async fn run_turn(
 
     let tool_schemas: Vec<wilai_providers::ToolSchema> = {
         let reg = service.registry.read().await;
-        reg.iter().map(|(_, spec)| schema_for(spec)).collect()
+        reg.iter()
+            .filter(|(_, spec)| crate::rbac::role_allows(role, spec))
+            .map(|(_, spec)| schema_for(spec))
+            .collect()
     };
 
     let turn_id = format!("t{}", history.len());
@@ -450,7 +493,7 @@ pub async fn run_turn(
                     args: tc.arguments.clone(),
                 })
                 .await;
-            let result = execute_call(
+            let result = execute_call_with_role(role,
                 tc,
                 service,
                 session_id,
@@ -512,7 +555,9 @@ pub async fn run_turn(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn execute_call(
+#[allow(clippy::too_many_arguments)]
+async fn execute_call_with_role(
+    role: &str,
     tc: &ToolCall,
     service: &Service,
     session: &str,
@@ -530,6 +575,27 @@ async fn execute_call(
     };
     let spec = &spec;
     let mode_now = service.mode.current().await;
+
+    // RBAC check: even if the LLM found the tool in its schema list,
+    // double-check at execution time. The LLM could have remembered a
+    // tool from the system prompt and tried to call it anyway.
+    if !crate::rbac::role_allows(role, spec) {
+        let reason = format!("role `{role}` is not allowed to call `{}`", spec.name);
+        let _ = service
+            .audit_tx
+            .send(WriteRequest {
+                session: session.to_string(),
+                mode: mode_now,
+                payload: EntryPayload::ToolDeny {
+                    tool_name: spec.name.clone(),
+                    args: tc.arguments.clone(),
+                    reason: reason.clone(),
+                    guard: format!("rbac/{role}"),
+                },
+            })
+            .await;
+        return Err(anyhow!(reason));
+    }
 
     let validated = match wilai_tools::validator::validate_args(spec, &tc.arguments) {
         Ok(v) => v,

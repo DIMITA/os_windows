@@ -51,6 +51,23 @@ voice_model    = "en_GB-alan-medium"
 quota_per_hour = 3
 proactivity    = "medium"
 
+[rbac]
+# Role-based access control. When enabled, each session's role is
+# derived from the peer uid of its unix socket, and the tool
+# catalogue is filtered accordingly. Three built-in roles:
+#   admin — every tool, every risk (uid 0 is always admin)
+#   user  — everything EXCEPT destructive/critical, network, and
+#           remote.wilai.* (the sensible default for a desktop user)
+#   guest — read-only, no sys.*, no remote.*
+# Unknown role names resolve to "guest" (least privilege).
+enabled      = false
+default_role = "user"
+# Explicit mapping. Keys are stringified uids.
+# [rbac.users]
+# "1000" = "admin"
+# "1001" = "user"
+# "1002" = "guest"
+
 [memory]
 # Keep the local SQLite memory disciplined. A daily task applies three
 # cuts in order: TTL (drop notes older than ttl_days), max rows, soft

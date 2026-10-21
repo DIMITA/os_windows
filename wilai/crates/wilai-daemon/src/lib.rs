@@ -3,6 +3,7 @@ pub mod ipc;
 pub mod mode_mgr;
 pub mod nudge;
 pub mod protocol;
+pub mod rbac;
 pub mod service;
 pub mod session;
 pub mod watchers;

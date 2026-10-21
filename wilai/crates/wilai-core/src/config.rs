@@ -33,6 +33,8 @@ pub struct Config {
     pub remotes: BTreeMap<String, RemoteConfig>,
     #[serde(default)]
     pub memory: MemoryConfig,
+    #[serde(default)]
+    pub rbac: RbacConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +228,52 @@ fn default_disk_poll() -> u32 { 60 }
 fn default_disk_threshold() -> u32 { 10 }
 fn default_process_poll() -> u32 { 30 }
 
+/// Role-based access control. Each session is tagged with a role
+/// derived from the peer uid of its unix socket. The role filters
+/// which tools the LLM can call. Three roles:
+///   admin — every tool, every category, every risk.
+///   user  — everything except destructive/critical AND network AND
+///           every remote.wilai.*. Reasonable default.
+///   guest — only category=read, risk≤low. No network, no mutation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RbacConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_role")]
+    pub default_role: String,
+    /// Explicit uid → role mapping. Keys are stringified uids
+    /// because TOML tables don't love integer keys.
+    #[serde(default)]
+    pub users: BTreeMap<String, String>,
+}
+
+fn default_role() -> String { "user".to_string() }
+
+impl Default for RbacConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            default_role: default_role(),
+            users: BTreeMap::new(),
+        }
+    }
+}
+
+impl RbacConfig {
+    /// Resolve a uid to a role. Honors explicit mapping, then falls
+    /// back to default_role. "root" (uid 0) is always admin so a
+    /// misconfig can be fixed from a root shell.
+    pub fn role_for(&self, uid: u32) -> &str {
+        if uid == 0 {
+            return "admin";
+        }
+        if let Some(r) = self.users.get(&uid.to_string()) {
+            return r;
+        }
+        &self.default_role
+    }
+}
+
 /// Memory discipline: Wilai's local SQLite must not grow forever,
 /// otherwise the whole "lean Linux agent" story falls apart. The
 /// compaction task runs daily and applies three cuts in order:
@@ -350,6 +398,7 @@ impl Default for Config {
             proactivity: ProactivityConfig::default(),
             remotes: BTreeMap::new(),
             memory: MemoryConfig::default(),
+            rbac: RbacConfig::default(),
         }
     }
 }
