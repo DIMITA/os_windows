@@ -11,7 +11,7 @@
 # Run as:
 #   PowerShell -ExecutionPolicy Bypass -File install.ps1
 #   PowerShell -ExecutionPolicy Bypass -File install.ps1 -Uninstall
-#   PowerShell -ExecutionPolicy Bypass -File install.ps1 -Mode ssh -Host wilai@my-box.lan
+#   PowerShell -ExecutionPolicy Bypass -File install.ps1 -Mode ssh -SshHost wilai@my-box.lan
 #   PowerShell -ExecutionPolicy Bypass -File install.ps1 -Mode wsl -Distro WilOS
 
 [CmdletBinding()]
@@ -20,7 +20,11 @@ param(
     [ValidateSet('wsl','ssh','ask')]
     [string]$Mode = 'ask',
     [string]$Distro,
-    [string]$Host
+    # Named 'SshHost' (not 'Host') because PowerShell reserves $Host
+    # as a read-only automatic variable; a param named Host throws
+    # "Impossible de remplacer la variable Host, car elle est
+    # constante ou en lecture seule" before anything runs.
+    [string]$SshHost
 )
 
 $ErrorActionPreference = 'Stop'
@@ -149,7 +153,7 @@ key  = ""
 "@ | Set-Content -LiteralPath $CfgFile -Encoding UTF8
         }
         'ssh' {
-            if (-not $Host) { $Host = Read-Host "SSH target (e.g. wilai@my-box.lan)" }
+            if (-not $SshHost) { $SshHost = Read-Host "SSH target (e.g. wilai@my-box.lan)" }
             @"
 # Wilai Windows bridge -- $(Get-Date -Format o)
 [bridge]
@@ -161,7 +165,7 @@ user   = ""
 shell  = "wilai-shell"
 
 [bridge.ssh]
-host = "$Host"
+host = "$SshHost"
 port = 22
 key  = ""
 "@ | Set-Content -LiteralPath $CfgFile -Encoding UTF8
