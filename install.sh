@@ -173,12 +173,44 @@ if [ "$FALLBACK_SOURCE" = 1 ]; then
             | sh -s -- -y --default-toolchain stable --profile minimal >/dev/null
         export PATH="/root/.cargo/bin:$PATH"
     fi
+
+    # Cap cargo parallelism based on available RAM. rustc in release
+    # mode can peak at ~3-4 GB per job on large crates (sqlcipher,
+    # rustls, the various async stacks); with Ollama already running
+    # it's easy to OOM a small VM. Rule of thumb: 1 job per ~3 GB
+    # of total RAM, clamped to [1, nproc].
+    total_mb=$(awk '/^MemTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 2048)
+    cpus=$(nproc 2>/dev/null || echo 2)
+    jobs=$(( total_mb / 3000 ))
+    [ "$jobs" -lt 1 ] && jobs=1
+    [ "$jobs" -gt "$cpus" ] && jobs=$cpus
+    export CARGO_BUILD_JOBS=$jobs
+    say "Build parallelism: $jobs job(s) (RAM ${total_mb} MB, CPUs ${cpus})."
+
+    # Add 2 GB of swap on the fly if the VM has < 6 GB RAM AND no
+    # swap yet — rustc linking in particular is swap-tolerant.
+    swap_mb=$(awk '/^SwapTotal:/ {print int($2/1024)}' /proc/meminfo 2>/dev/null || echo 0)
+    if [ "$total_mb" -lt 6000 ] && [ "$swap_mb" -lt 1000 ]; then
+        say "Adding 2 GB temporary swap at /swap-wilai-install (low-RAM VM)..."
+        fallocate -l 2G /swap-wilai-install 2>/dev/null \
+            || dd if=/dev/zero of=/swap-wilai-install bs=1M count=2048 status=none
+        chmod 600 /swap-wilai-install
+        mkswap /swap-wilai-install >/dev/null 2>&1
+        swapon /swap-wilai-install 2>/dev/null || true
+    fi
+
     SRC=$(mktemp -d)
-    say "Cloning repo + building (grab a coffee, ~5 min)..."
+    say "Cloning repo + building (grab a coffee, 5-15 min)..."
     git clone --depth 1 "https://github.com/${REPO}.git" "$SRC" >/dev/null 2>&1
     cd "$SRC/wilai"
     ./scripts/build-deb --release
     DEB=$(ls dist/debian/out/wilai_*_${ARCH}.deb | head -1)
+
+    # Drop the temporary swap if we added it.
+    if [ -f /swap-wilai-install ]; then
+        swapoff /swap-wilai-install 2>/dev/null || true
+        rm -f /swap-wilai-install
+    fi
 else
     say "Downloading $(basename "$DEB_URL")..."
     DEB=$(mktemp --suffix=.deb)
