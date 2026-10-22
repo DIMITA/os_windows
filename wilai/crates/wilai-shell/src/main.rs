@@ -36,7 +36,7 @@ use wilai_core::VoiceConfig;
 use wilai_daemon::protocol::ServerEvent;
 
 use app::{App, PendingConfirm, Who};
-use client::DaemonClient;
+use client::{DaemonReader, DaemonSender};
 use face::FaceState;
 use voice::VoiceEngine;
 
@@ -377,13 +377,13 @@ async fn run_app(
         }
     }
 
-    let client = loop_connect(socket, Arc::clone(&app)).await?;
-    let client = Arc::new(Mutex::new(client));
+    let (reader, sender) = loop_connect(socket, Arc::clone(&app)).await?;
+    let sender = Arc::new(Mutex::new(sender));
 
     // Auto-send wizard seed first.
     if let Some(seed) = wizard_seed {
-        let mut c = client.lock().await;
-        if let Err(e) = c.send_prompt(seed, model.clone(), provider.clone()).await {
+        let mut s = sender.lock().await;
+        if let Err(e) = s.send_prompt(seed, model.clone(), provider.clone()).await {
             let mut a = app.lock().await;
             a.push(Who::System, format!("wizard seed failed: {e:#}"));
         } else {
@@ -392,20 +392,18 @@ async fn run_app(
             a.set_face(FaceState::Thinking);
             a.busy = true;
         }
-        drop(c);
+        drop(s);
         clear_wizard_marker();
     }
 
-    // Daemon reader task.
+    // Daemon reader task — owns the read half outright, no mutex,
+    // so it can block on next_event() without blocking the sender
+    // half (which is what caused the UI freeze reported in v1.0.0).
     let (ev_tx, mut ev_rx) = mpsc::channel::<ServerEvent>(64);
-    let client_r = Arc::clone(&client);
     let reader_task = tokio::spawn(async move {
+        let mut reader = reader;
         loop {
-            let next = {
-                let mut c = client_r.lock().await;
-                c.next_event().await
-            };
-            match next {
+            match reader.next_event().await {
                 Ok(ev) => {
                     if ev_tx.send(ev).await.is_err() {
                         return;
@@ -490,11 +488,32 @@ async fn run_app(
                 let mut a = app.lock().await;
                 if let Some(action) = handle_key(&mut a, k) {
                     drop(a);
-                    dispatch_action(action, &client, &app, &model, &provider, &voice, &voice_tx).await;
+                    // Spawn the dispatch instead of awaiting it inline;
+                    // awaiting inline would freeze the select! (and
+                    // therefore the whole UI) during the socket write.
+                    // Even though send_* is fast, this is the right
+                    // model: the UI stays responsive, period.
+                    let sender_c = Arc::clone(&sender);
+                    let app_c = Arc::clone(&app);
+                    let model_c = model.clone();
+                    let provider_c = provider.clone();
+                    let voice_c = voice.clone();
+                    let voice_tx_c = voice_tx.clone();
+                    tokio::spawn(async move {
+                        dispatch_action(action, &sender_c, &app_c, &model_c, &provider_c, &voice_c, &voice_tx_c).await;
+                    });
                 }
             }
             Some(vev) = voice_rx.recv() => {
-                handle_voice_event(vev, &app, &client, &model, &provider, &voice, &voice_tx).await;
+                let sender_c = Arc::clone(&sender);
+                let app_c = Arc::clone(&app);
+                let model_c = model.clone();
+                let provider_c = provider.clone();
+                let voice_c = voice.clone();
+                let voice_tx_c = voice_tx.clone();
+                tokio::spawn(async move {
+                    handle_voice_event(vev, &app_c, &sender_c, &model_c, &provider_c, &voice_c, &voice_tx_c).await;
+                });
             }
         }
     }
@@ -504,16 +523,16 @@ async fn run_app(
     Ok(())
 }
 
-async fn loop_connect(socket: &std::path::Path, app: Arc<Mutex<App>>) -> Result<DaemonClient> {
+async fn loop_connect(socket: &std::path::Path, app: Arc<Mutex<App>>) -> Result<(DaemonReader, DaemonSender)> {
     for attempt in 0..40 {
-        match DaemonClient::connect(socket).await {
-            Ok(mut c) => match c.next_event().await? {
+        match client::connect(socket).await {
+            Ok((mut reader, sender)) => match reader.next_event().await? {
                 ServerEvent::SessionStart { session } => {
                     let mut a = app.lock().await;
                     a.session = Some(session.clone());
                     a.status_right = "connected".into();
                     a.push(Who::System, format!("session {session} started."));
-                    return Ok(c);
+                    return Ok((reader, sender));
                 }
                 other => {
                     let mut a = app.lock().await;
@@ -728,7 +747,7 @@ Ask 'what tools do you have?' to see the live tool list.\
 
 async fn dispatch_action(
     action: KeyAction,
-    client: &Arc<Mutex<DaemonClient>>,
+    sender: &Arc<Mutex<DaemonSender>>,
     app: &Arc<Mutex<App>>,
     model: &Option<String>,
     provider: &Option<String>,
@@ -737,19 +756,19 @@ async fn dispatch_action(
 ) {
     match action {
         KeyAction::SendPrompt(text) => {
-            let mut c = client.lock().await;
-            if let Err(e) = c.send_prompt(text, model.clone(), provider.clone()).await {
+            let mut s = sender.lock().await;
+            if let Err(e) = s.send_prompt(text, model.clone(), provider.clone()).await {
                 let mut a = app.lock().await;
                 a.push(Who::System, format!("send failed: {e:#}"));
             }
         }
         KeyAction::Confirm { id, yes } => {
-            let mut c = client.lock().await;
-            let _ = c.send_confirm(id, yes).await;
+            let mut s = sender.lock().await;
+            let _ = s.send_confirm(id, yes).await;
         }
         KeyAction::Quit => {
-            let mut c = client.lock().await;
-            let _ = c.send_quit().await;
+            let mut s = sender.lock().await;
+            let _ = s.send_quit().await;
             let mut a = app.lock().await;
             a.quit = true;
         }
@@ -782,7 +801,7 @@ async fn dispatch_action(
 async fn handle_voice_event(
     ev: VoiceEvent,
     app: &Arc<Mutex<App>>,
-    client: &Arc<Mutex<DaemonClient>>,
+    sender: &Arc<Mutex<DaemonSender>>,
     model: &Option<String>,
     provider: &Option<String>,
     voice: &Option<VoiceEngine>,
@@ -826,8 +845,8 @@ async fn handle_voice_event(
             a.set_face(FaceState::Thinking);
             a.busy = true;
             drop(a);
-            let mut c = client.lock().await;
-            if let Err(e) = c.send_prompt(text, model.clone(), provider.clone()).await {
+            let mut s = sender.lock().await;
+            if let Err(e) = s.send_prompt(text, model.clone(), provider.clone()).await {
                 let mut a = app.lock().await;
                 a.push(Who::System, format!("send failed: {e:#}"));
                 a.busy = false;
