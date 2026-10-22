@@ -14,8 +14,27 @@ pub fn validate(pattern: &str, value: &str) -> Result<()> {
         "pkg_name" => check_pkg_name(value),
         "username" => check_username(value),
         "nmap_port_spec" => check_nmap_port_spec(value),
-        other => bail!("unknown pattern: {other}"),
+        // Anything else: treat as a raw regex. Covers the many YAML
+        // tool specs that write `pattern: "^[a-zA-Z0-9…]+$"` inline.
+        // Compile fresh each call — the catalogue is small and this
+        // isn't on a hot path. An uncompilable regex falls back to a
+        // "no such named pattern" error so YAML typos still surface.
+        other => check_regex(other, value),
     }
+}
+
+fn check_regex(pattern: &str, value: &str) -> Result<()> {
+    // An empty value against ANY regex that requires >=1 char would
+    // fail; but YAML specs mark these fields `required: false`, and
+    // the caller still ends up passing "" for optional inputs. Treat
+    // empty as a no-op match — the executor's cmd template drops it.
+    if value.is_empty() { return Ok(()); }
+    let re = regex::Regex::new(pattern)
+        .map_err(|e| anyhow::anyhow!("invalid pattern (not a known name and not a valid regex): {e}"))?;
+    if !re.is_match(value) {
+        bail!("value does not match pattern {pattern}");
+    }
+    Ok(())
 }
 
 fn check_path(v: &str) -> Result<()> {
@@ -172,4 +191,47 @@ pub fn path_under(path: &Path, roots: &[&Path]) -> bool {
         let rcanon = std::fs::canonicalize(r).unwrap_or_else(|_| (*r).to_path_buf());
         canon.starts_with(&rcanon)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn named_patterns_still_work() {
+        assert!(validate("url", "https://example.com").is_ok());
+        assert!(validate("cidr", "10.0.0.0/24").is_ok());
+        assert!(validate("host", "example.com").is_ok());
+        assert!(validate("path", "/etc/passwd").is_ok());
+    }
+
+    #[test]
+    fn raw_regex_pattern_is_accepted() {
+        // The regression bug: sys.service.list ships
+        // pattern: "^[a-zA-Z0-9@._*?\\-]+$" as a raw regex. Validator
+        // used to reject every non-named pattern.
+        assert!(validate("^[a-zA-Z0-9@._*?\\-]+$", "ollama.service").is_ok());
+        assert!(validate("^[0-9]+$", "42").is_ok());
+    }
+
+    #[test]
+    fn raw_regex_mismatch_fails() {
+        assert!(validate("^[0-9]+$", "abc").is_err());
+        assert!(validate("^foo$", "bar").is_err());
+    }
+
+    #[test]
+    fn empty_value_against_raw_regex_is_noop() {
+        // Optional-input fields often arrive as "". A `+`-anchored
+        // regex would reject that, but we treat empty as "not
+        // supplied" rather than "invalid".
+        assert!(validate("^[a-z]+$", "").is_ok());
+    }
+
+    #[test]
+    fn invalid_regex_surfaces_as_error() {
+        // Catch YAML typos — unclosed bracket class.
+        let err = validate("^[a-z", "foo").unwrap_err().to_string();
+        assert!(err.contains("not a valid regex"), "got: {err}");
+    }
 }

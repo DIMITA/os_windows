@@ -6,6 +6,7 @@ license.workspace = true
 description = "Wilai typed tool registry, validator, and executor."
 
 [dependencies]
+regex.workspace = true
 wilai-core.workspace = true
 anyhow.workspace = true
 thiserror.workspace = true
