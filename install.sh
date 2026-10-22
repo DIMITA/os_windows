@@ -57,10 +57,14 @@
 set -eu
 
 #─── pretty output ────────────────────────────────────────────────
+# Store the actual ESC byte in each variable so `cat <<EOF`
+# interpolates it correctly. Writing them as '\033[…]' strings only
+# works when passed through printf — cat/here-docs print them raw.
 is_tty() { [ -t 1 ]; }
 if is_tty; then
-    C_BLUE='\033[1;34m'; C_GREEN='\033[1;32m'; C_YELLOW='\033[1;33m'
-    C_RED='\033[1;31m';  C_DIM='\033[2m';     C_RST='\033[0m'
+    ESC=$(printf '\033')
+    C_BLUE="${ESC}[1;34m"; C_GREEN="${ESC}[1;32m"; C_YELLOW="${ESC}[1;33m"
+    C_RED="${ESC}[1;31m";  C_DIM="${ESC}[2m";     C_RST="${ESC}[0m"
 else
     C_BLUE=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_DIM=''; C_RST=''
 fi
@@ -168,12 +172,18 @@ elif [ "${WILAI_OLLAMA_NATIVE:-0}" = 1 ]; then
     )
     install -m 0755 "$tmp/ollama" /usr/local/bin/ollama
     rm -rf "$tmp"
-    # systemd unit — same shape as the upstream installer's one.
+    # systemd unit — same shape as the upstream installer's one,
+    # with the GUI-friendly CPU budget baked in.
     if ! id ollama >/dev/null 2>&1; then
         useradd -r -s /bin/false -U -d /usr/share/ollama ollama || true
     fi
     install -d -o ollama -g ollama /usr/share/ollama
-    cat > /etc/systemd/system/ollama.service <<'EOF'
+    _cpus=$(nproc 2>/dev/null || echo 2)
+    if [ "$_cpus" -le 2 ]; then _threads=1
+    elif [ "$_cpus" -le 4 ]; then _threads=$((_cpus - 1))
+    else _threads=4
+    fi
+    cat > /etc/systemd/system/ollama.service <<EOF
 [Unit]
 Description=Ollama (native build via WILAI_OLLAMA_NATIVE=1)
 After=network-online.target
@@ -183,7 +193,10 @@ ExecStart=/usr/local/bin/ollama serve
 User=ollama
 Group=ollama
 Restart=always
+Nice=10
+CPUWeight=50
 Environment="HOME=/usr/share/ollama"
+Environment="OLLAMA_NUM_THREAD=$_threads"
 
 [Install]
 WantedBy=multi-user.target
@@ -218,6 +231,41 @@ else
     else
         die "ollama installed but not answering on 127.0.0.1:11434 — try: sudo systemctl status ollama"
     fi
+fi
+
+#─── 2b. CPU budget for Ollama — keep the GUI responsive ─────────
+# On a 2-vCPU VirtualBox VM, Ollama inference at 100% on both cores
+# starves the host from drawing the guest GUI. Even a 14 GB VM
+# freezes visually because the issue isn't memory, it's CPU
+# scheduling. Give Ollama lower priority + a thread cap so one core
+# is always free for the compositor + wilai-shell. Users can
+# override by editing the drop-in.
+# Skip when WILAI_REMOTE_OLLAMA — the local box has no Ollama to
+# throttle, inference pressure lives on the remote host.
+if [ -z "${WILAI_REMOTE_OLLAMA:-}" ]; then
+    cpus=$(nproc 2>/dev/null || echo 2)
+    # Leave 1 core for the GUI; cap at 4 so bigger hosts don't give
+    # all 32 threads to Ollama (that spikes power + heat without
+    # helping inference on a bandwidth-bound workload).
+    if [ "$cpus" -le 2 ]; then
+        threads=1
+    elif [ "$cpus" -le 4 ]; then
+        threads=$((cpus - 1))
+    else
+        threads=4
+    fi
+    install -d /etc/systemd/system/ollama.service.d
+    cat > /etc/systemd/system/ollama.service.d/wilai-cpu.conf <<EOF
+# Wilai-managed CPU budget. Keeps the host GUI responsive by
+# leaving at least one core free. Tweak freely.
+[Service]
+Nice=10
+CPUWeight=50
+Environment="OLLAMA_NUM_THREAD=$threads"
+EOF
+    systemctl daemon-reload
+    systemctl restart ollama >/dev/null 2>&1 || true
+    ok "ollama CPU budget: Nice=10, OLLAMA_NUM_THREAD=$threads (of $cpus cpus)"
 fi
 
 #─── 3. Pull LLM models (foreground, user sees progress) ─────────

@@ -26,8 +26,9 @@ set -eu
 
 is_tty() { [ -t 1 ]; }
 if is_tty; then
-    C_BLUE='\033[1;34m'; C_GREEN='\033[1;32m'; C_YELLOW='\033[1;33m'
-    C_RED='\033[1;31m';  C_RST='\033[0m'
+    ESC=$(printf '\033')
+    C_BLUE="${ESC}[1;34m"; C_GREEN="${ESC}[1;32m"; C_YELLOW="${ESC}[1;33m"
+    C_RED="${ESC}[1;31m";  C_RST="${ESC}[0m"
 else
     C_BLUE=''; C_GREEN=''; C_YELLOW=''; C_RED=''; C_RST=''
 fi
