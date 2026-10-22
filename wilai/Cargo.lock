@@ -2920,7 +2920,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-audit"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "chacha20poly1305",
@@ -2942,7 +2942,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-bridge"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2953,7 +2953,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-cli"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2976,7 +2976,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-core"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "dirs",
@@ -2991,7 +2991,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-daemon"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3018,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-hud"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3037,7 +3037,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-mcp"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3053,7 +3053,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-memory"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3072,7 +3072,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-overlay"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3087,7 +3087,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-pentest"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "hex",
@@ -3107,7 +3107,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-providers"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-shell"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -3142,7 +3142,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-tools"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -3158,7 +3158,7 @@ dependencies = [
 
 [[package]]
 name = "wilai-voice"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "anyhow",
  "clap",
