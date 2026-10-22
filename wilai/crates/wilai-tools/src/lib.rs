@@ -1,5 +1,6 @@
 pub mod builtins;
 pub mod confirm;
+pub mod deny;
 pub mod executor;
 pub mod guards;
 pub mod patterns;
