@@ -14,8 +14,16 @@ inputs:
   pattern:
     type: string
     required: false
-    pattern: "^[a-zA-Z0-9@._*?\\-]+$"
-    description: Optional unit-name glob (e.g. "wilai-*").
+    pattern: "^[a-zA-Z0-9@._*?\\-]*$"
+    description: >
+      Optional SHELL GLOB (not regex) to filter by unit name. Use "*"
+      for any chars, "?" for one char, hyphens are literal.
+      Examples: "wilai-*", "systemd-*", "nginx.service". Leave EMPTY
+      ("") to list every unit matching the state filter. DO NOT pass
+      regex syntax like "systemd.*" — that is a glob meaning
+      "systemd" + literal dot + anything, and matches nothing because
+      units are named "systemd-journald", "systemd-logind" with
+      hyphens.
 
 executor:
   type: subprocess
