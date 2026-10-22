@@ -63,4 +63,22 @@ pub trait Provider: Send + Sync {
     fn name(&self) -> &str;
     fn is_local(&self) -> bool;
     async fn chat(&self, req: ChatRequest) -> Result<ChatResponse>;
+
+    /// Streaming variant: calls back on each text chunk as the model
+    /// generates it, returns the fully-assembled ChatResponse at the
+    /// end. Default implementation routes through chat() and emits a
+    /// single chunk at the end — override on providers that have a
+    /// real streaming API (Ollama does; AnthropicProvider could, as a
+    /// follow-up).
+    async fn chat_streaming(
+        &self,
+        req: ChatRequest,
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        let resp = self.chat(req).await?;
+        if !resp.message.content.is_empty() {
+            let _ = chunk_tx.send(resp.message.content.clone()).await;
+        }
+        Ok(resp)
+    }
 }

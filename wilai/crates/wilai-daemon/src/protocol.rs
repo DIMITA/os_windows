@@ -48,8 +48,16 @@ pub enum ConfirmReply {
 pub enum ServerEvent {
     /// Sent once per connection right after handshake.
     SessionStart { session: String },
-    /// Plain text content from the assistant.
+    /// Plain text content from the assistant. Non-streaming providers
+    /// (or the agent loop between tool calls) send this once per turn
+    /// with the full content.
     Text { content: String },
+    /// Incremental token from a streaming provider. Shells concatenate
+    /// into the current assistant message and redraw as chunks arrive.
+    /// A streaming turn ends with TurnDone (same as non-streaming); the
+    /// shell may want to emit the concatenated full text as a single
+    /// final Text at that point for TTS / history purposes.
+    TextChunk { delta: String },
     /// Informational: a tool is about to be invoked. Useful for UIs to
     /// render progress before the tool returns.
     ToolCall { name: String, args: Value },

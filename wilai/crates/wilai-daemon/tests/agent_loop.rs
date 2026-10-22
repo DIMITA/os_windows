@@ -160,11 +160,10 @@ async fn agent_loop_runs_tool_then_replies() {
     assert!(ok, "fs.read tool result not ok");
     assert!(output.contains("hello wilai"), "fs.read output missing payload: {output}");
 
-    // Final event is a Text with the model's second-turn summary.
-    let final_text = events.iter().rev().find_map(|e| match e {
-        ServerEvent::Text { content } => Some(content.clone()),
-        _ => None,
-    });
+    // Final text comes through either as one Text (non-streaming
+    // provider) or as the concatenation of TextChunk deltas (streaming
+    // path). Accept both.
+    let final_text = assemble_final_text(&events);
     assert_eq!(final_text.as_deref(), Some("The file says: hello wilai"));
 }
 
@@ -232,9 +231,30 @@ async fn agent_loop_handles_unknown_tool() {
         .any(|e| matches!(e, ServerEvent::ToolResult { ok: false, name, .. } if name == "no.such.tool"));
     assert!(got_tool_err, "expected ToolResult ok=false for unknown tool: {events:#?}");
 
-    let final_text = events.iter().rev().find_map(|e| match e {
-        ServerEvent::Text { content } => Some(content.clone()),
-        _ => None,
-    });
+    let final_text = assemble_final_text(&events);
     assert_eq!(final_text.as_deref(), Some("sorry, I can't do that"));
+}
+
+/// Return the full assistant text for the final turn, whether it was
+/// delivered as a single `Text` or streamed as `TextChunk` deltas.
+fn assemble_final_text(events: &[ServerEvent]) -> Option<String> {
+    // Walk forward: reset the accumulator on each ToolResult (which
+    // marks the end of a prior turn); append any TextChunk deltas and
+    // any Text payload we see; return whatever's buffered at the end.
+    let mut buf: Option<String> = None;
+    for ev in events {
+        match ev {
+            ServerEvent::ToolResult { .. } => {
+                buf = None;
+            }
+            ServerEvent::Text { content } => {
+                buf = Some(content.clone());
+            }
+            ServerEvent::TextChunk { delta } => {
+                buf.get_or_insert_with(String::new).push_str(delta);
+            }
+            _ => {}
+        }
+    }
+    buf
 }

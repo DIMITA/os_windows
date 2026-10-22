@@ -154,6 +154,20 @@ impl App {
         }
     }
 
+    /// Append streaming text to the most recent Wilai message, or
+    /// start a new one if the last line isn't a Wilai turn. Used by
+    /// ServerEvent::TextChunk — each token delta extends the live
+    /// assistant message as it's being generated.
+    pub fn append_wilai_chunk(&mut self, delta: &str) {
+        if let Some(last) = self.log.back_mut() {
+            if matches!(last.who, Who::Wilai) {
+                last.text.push_str(delta);
+                return;
+            }
+        }
+        self.push(Who::Wilai, delta.to_string());
+    }
+
     pub fn set_face(&mut self, s: FaceState) {
         self.face = s;
     }

@@ -271,6 +271,15 @@ async fn run_daemon_turn(socket: &Path, prompt: &str) -> Result<Vec<String>> {
         let ev: ServerEvent = serde_json::from_str(&line)?;
         match ev {
             ServerEvent::Text { content } => texts.push(content),
+            ServerEvent::TextChunk { delta } => {
+                // Accumulate streamed deltas into the current pending
+                // text so TTS speaks the full phrase at TurnDone.
+                if let Some(last) = texts.last_mut() {
+                    last.push_str(&delta);
+                } else {
+                    texts.push(delta);
+                }
+            }
             ServerEvent::ToolCall { name, args: _ } => {
                 eprintln!("[voice] tool call: {name}");
             }

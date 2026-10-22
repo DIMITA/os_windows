@@ -425,7 +425,23 @@ pub async fn run_turn_with_role(
             max_tokens: None,
         };
         let start = Instant::now();
-        let resp = provider.chat(req).await;
+        // Streaming path: open a chunk channel and forward each delta
+        // to the client as ServerEvent::TextChunk. The provider returns
+        // the fully-assembled ChatResponse at the end for audit + tool
+        // extraction. Non-streaming providers use the default trait
+        // impl which emits a single chunk at completion.
+        let (chunk_tx, mut chunk_rx) = tokio::sync::mpsc::channel::<String>(64);
+        let evt_fwd = event_tx.clone();
+        let forwarder = tokio::spawn(async move {
+            let mut any = false;
+            while let Some(delta) = chunk_rx.recv().await {
+                any = true;
+                let _ = evt_fwd.send(ServerEvent::TextChunk { delta }).await;
+            }
+            any
+        });
+        let resp = provider.chat_streaming(req, chunk_tx).await;
+        let streamed_any = forwarder.await.unwrap_or(false);
         let duration_ms = start.elapsed().as_millis() as u64;
 
         let mode_now = service.mode.current().await;
@@ -473,7 +489,15 @@ pub async fn run_turn_with_role(
         };
 
         if resp.message.tool_calls.is_empty() {
-            if !resp.message.content.is_empty() {
+            // Only emit the final Text event when nothing was streamed:
+            // streaming clients have already displayed the full content
+            // via TextChunk, and a trailing Text would double it up.
+            // Non-streaming clients (voice, cli, overlay) rely on this
+            // Text for their TTS/display pipelines — and since the
+            // default chat_streaming impl emits exactly one chunk at
+            // completion, those clients will still see one TextChunk
+            // and nothing else is lost.
+            if !resp.message.content.is_empty() && !streamed_any {
                 let _ = event_tx
                     .send(ServerEvent::Text {
                         content: resp.message.content.clone(),

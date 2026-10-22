@@ -214,6 +214,123 @@ impl Provider for OllamaProvider {
             output_tokens: parsed.eval_count,
         })
     }
+
+    async fn chat_streaming(
+        &self,
+        req: ChatRequest,
+        chunk_tx: tokio::sync::mpsc::Sender<String>,
+    ) -> Result<ChatResponse> {
+        // Build the request the same way as chat(), but with stream=true.
+        let mut messages: Vec<OllamaMessage> = Vec::with_capacity(req.messages.len() + 1);
+        if let Some(sys) = req.system {
+            messages.push(OllamaMessage {
+                role: "system".to_string(),
+                content: sys,
+                tool_calls: vec![],
+            });
+        }
+        for m in req.messages {
+            messages.push(to_ollama_message(m));
+        }
+        let tools: Vec<OllamaTool> = req
+            .tools
+            .into_iter()
+            .map(|t| OllamaTool {
+                kind: "function",
+                function: OllamaFunctionSpec {
+                    name: t.name,
+                    description: t.description,
+                    parameters: t.parameters,
+                },
+            })
+            .collect();
+        let body = OllamaChatRequest {
+            model: &req.model,
+            messages,
+            tools,
+            stream: true,
+            options: OllamaOptions {
+                num_predict: req.max_tokens,
+            },
+        };
+
+        let url = format!("{}/api/chat", self.base_url.trim_end_matches('/'));
+        let resp = self.client.post(&url).json(&body).send().await
+            .with_context(|| format!("POST {url}"))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            anyhow::bail!("ollama HTTP {}: {}", status, text);
+        }
+
+        // Ollama streams NDJSON: one JSON object per line, each with
+        // {"message":{"content":"...","tool_calls":[...]},"done":bool,
+        //  "prompt_eval_count":..,"eval_count":..}.
+        // We accumulate content, forward each non-empty delta to
+        // chunk_tx, and surface tool_calls from the final object.
+        use tokio::io::AsyncBufReadExt;
+        use tokio::io::BufReader;
+        use futures_util::StreamExt;
+        let stream = resp.bytes_stream().map(|r| r.map_err(std::io::Error::other));
+        let reader = tokio_util::io::StreamReader::new(stream);
+        let mut lines = BufReader::new(reader).lines();
+
+        let mut full_content = String::new();
+        let mut final_tool_calls: Vec<OllamaToolCall> = Vec::new();
+        let mut prompt_tokens: Option<u32> = None;
+        let mut output_tokens: Option<u32> = None;
+
+        while let Some(line) = lines.next_line().await.context("read stream line")? {
+            if line.trim().is_empty() { continue; }
+            let obj: OllamaStreamChunk = serde_json::from_str(&line)
+                .with_context(|| format!("parse stream chunk: {line}"))?;
+            if !obj.message.content.is_empty() {
+                full_content.push_str(&obj.message.content);
+                // Non-blocking send; if the receiver is gone, we still
+                // keep draining the stream for correctness.
+                let _ = chunk_tx.send(obj.message.content).await;
+            }
+            if !obj.message.tool_calls.is_empty() {
+                final_tool_calls = obj.message.tool_calls;
+            }
+            if obj.done {
+                prompt_tokens = obj.prompt_eval_count;
+                output_tokens = obj.eval_count;
+                break;
+            }
+        }
+
+        let tool_calls: Vec<ToolCall> = final_tool_calls
+            .into_iter()
+            .enumerate()
+            .map(|(i, tc)| ToolCall {
+                id: format!("call_{i}"),
+                name: tc.function.name,
+                arguments: tc.function.arguments,
+            })
+            .collect();
+
+        Ok(ChatResponse {
+            message: AssistantMessage {
+                content: full_content,
+                tool_calls,
+            },
+            prompt_tokens,
+            output_tokens,
+        })
+    }
+}
+
+/// One NDJSON object yielded by Ollama's /api/chat?stream=true.
+#[derive(Deserialize, Debug)]
+struct OllamaStreamChunk {
+    message: OllamaMessage,
+    #[serde(default)]
+    done: bool,
+    #[serde(default)]
+    prompt_eval_count: Option<u32>,
+    #[serde(default)]
+    eval_count: Option<u32>,
 }
 
 fn to_ollama_message(m: Message) -> OllamaMessage {

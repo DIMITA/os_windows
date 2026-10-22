@@ -125,6 +125,13 @@ async fn drive_session(cli: &Cli, socket: &Path, prompt: &str) -> Result<()> {
             ServerEvent::Text { content } => {
                 notify(cli, "Wilai", &content, &cli.urgency).await;
             }
+            ServerEvent::TextChunk { .. } => {
+                // Overlay sends one notification per phrase; firing a
+                // notification per token would spam the desktop. Skip
+                // deltas; the daemon only emits a final Text when
+                // nothing was streamed, so overlay still gets its one
+                // notification when streaming is off.
+            }
             ServerEvent::ToolCall { name, args } => {
                 let body = format!("{name} {}", trim(&args.to_string(), 240));
                 notify(cli, "tool call", &body, "low").await;

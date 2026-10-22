@@ -74,6 +74,7 @@ async fn drive(stream: UnixStream, state: &Arc<SharedFaceState>) -> Result<()> {
         };
         match ev {
             ServerEvent::Text { .. } => state.set(FaceState::Speaking),
+            ServerEvent::TextChunk { .. } => state.set(FaceState::Speaking),
             ServerEvent::ToolCall { .. } => state.set(FaceState::Acting),
             ServerEvent::ToolResult { ok: false, .. } => state.set(FaceState::Alert),
             ServerEvent::ToolResult { ok: true, .. } => state.set(FaceState::Thinking),

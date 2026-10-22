@@ -949,6 +949,10 @@ fn handle_server_event(app: &mut App, ev: ServerEvent) {
             app.push(Who::Wilai, content);
             app.set_face(FaceState::Speaking);
         }
+        ServerEvent::TextChunk { delta } => {
+            app.append_wilai_chunk(&delta);
+            app.set_face(FaceState::Speaking);
+        }
         ServerEvent::ToolCall { name, args } => {
             app.push(Who::Tool, format!("→ {name} {args}"));
             app.set_face(FaceState::Acting);

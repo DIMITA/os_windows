@@ -120,6 +120,11 @@ where
             ServerEvent::Text { content } => {
                 println!("{content}");
             }
+            ServerEvent::TextChunk { delta } => {
+                use std::io::Write as _;
+                print!("{delta}");
+                let _ = std::io::stdout().flush();
+            }
             ServerEvent::ToolCall { name, args } => {
                 eprintln!("[tool call] {name} {args}");
             }
