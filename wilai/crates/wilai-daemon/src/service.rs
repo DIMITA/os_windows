@@ -87,6 +87,25 @@ impl Service {
         }
         Ok(provider)
     }
+
+    /// Best-effort: tell an Ollama provider to drop a model from RAM
+    /// immediately (keep_alive=0). No-op for non-Ollama providers.
+    /// Swallows errors — this runs on session shutdown and must
+    /// never block or fail the shutdown path.
+    pub async fn unload_model_from_provider(&self, provider_name: &str, model: &str) {
+        let Some(pcfg) = self.cfg.providers.get(provider_name) else { return; };
+        if pcfg.kind != "ollama" { return; }
+        let url = pcfg
+            .url
+            .clone()
+            .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+        let Ok(provider) = OllamaProvider::new(provider_name, url) else { return; };
+        if let Err(e) = provider.unload_model(model).await {
+            tracing::debug!(provider = provider_name, model, "unload_model failed: {e:#}");
+        } else {
+            tracing::info!(provider = provider_name, model, "unloaded model from Ollama");
+        }
+    }
 }
 
 /// Spawn a supervisor per configured MCP server. Each supervisor keeps

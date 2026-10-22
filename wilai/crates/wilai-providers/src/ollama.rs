@@ -23,6 +23,33 @@ impl OllamaProvider {
             client,
         })
     }
+
+    /// Tell Ollama to drop a model from RAM immediately. We POST to
+    /// /api/generate with an empty prompt and keep_alive=0 — that's
+    /// the documented Ollama idiom for forcing an unload without
+    /// generating any tokens. Short timeout (5s): if Ollama is slow
+    /// or already gone, we give up rather than blocking shutdown.
+    pub async fn unload_model(&self, model: &str) -> Result<()> {
+        let url = format!("{}/api/generate", self.base_url.trim_end_matches('/'));
+        let body = serde_json::json!({
+            "model": model,
+            "prompt": "",
+            "stream": false,
+            "keep_alive": 0,
+        });
+        let short = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
+        short
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        Ok(())
+    }
+
+    pub fn base_url(&self) -> &str { &self.base_url }
 }
 
 #[derive(Serialize)]
