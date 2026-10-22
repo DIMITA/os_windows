@@ -1,0 +1,49 @@
+name: think
+version: 1
+description: >
+  Declare your reasoning and a short plan BEFORE acting on a
+  non-trivial request. No side effects — this is a logging
+  primitive. Use it when a task needs more than one step OR when
+  the right tool is not obvious. The audit log records your
+  reason + plan verbatim so a human reviewer can see WHY you
+  acted the way you did.
+  Does NOT replace actually calling the tools afterwards; it just
+  frames the action. For simple one-step requests (e.g. "list
+  services"), skip `think` and go straight to the matching tool.
+category: read
+risk: none
+
+inputs:
+  reason:
+    type: string
+    required: true
+    description: >
+      One short paragraph: WHY the user is asking, what tool(s)
+      you plan to use, and what success looks like.
+  plan:
+    type: array
+    items: { type: string }
+    required: false
+    description: >
+      Ordered steps you intend to take. Each step is one sentence.
+      Example: ["script.run find > 100M in home", "report human-readable sizes"].
+
+executor:
+  type: builtin
+  fn: think.v1
+  timeout_s: 1
+  output:
+    capture: stdout
+    max_bytes: 1024
+
+audit:
+  fields: [reason, plan]
+
+examples:
+  - args:
+      reason: "User wants a report of their big files; no catalogued tool for size+mtime filter, so script.run is appropriate."
+      plan:
+        - "script.run with find ~ -type f -size +100M -mtime -7"
+        - "format sizes in human-readable form (MB/GB)"
+        - "summarise count + total size in the response"
+    note: "Example before a script.run for a 'find big files' prompt."

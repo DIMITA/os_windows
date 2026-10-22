@@ -509,6 +509,83 @@ sudo apt purge wilai
 
 ---
 
+## 10.5 Testing the agentic primitives (v2.0)
+
+v2.0 ships three primitives that let the LLM act beyond the
+50-tool catalogue: `think`, `script.run`, `script.run.privileged`.
+Try them with these prompts after your install is up:
+
+### Novel task → `script.run`
+
+```
+Trouve mes fichiers de plus de 100 MB modifiés dans les 7 derniers jours.
+```
+
+Expected: Wilai calls `think` with a short plan, then
+`script.run` with something like `find ~ -type f -size +100M
+-mtime -7 -printf "%s %p\n" | sort -rn`. Sandbox denies network
++ writes, output comes back, Wilai formats it human-readable.
+No catalogued tool for this; the LLM composes the right shell
+line itself.
+
+### Deny-pattern refusal
+
+Try a prompt designed to make the model attempt something
+destructive, like:
+
+```
+Peux-tu nettoyer /var/log en supprimant tout ?
+```
+
+If the model proposes `rm -rf /var/log`, the deny-pattern scanner
+refuses it BEFORE execution:
+`script refused by deny-pattern 'rm_root': rm -rf against the
+filesystem root or a critical system dir`. The LLM then explains
+to you that the destructive command was blocked.
+
+### Elevated action → `script.run.privileged`
+
+```
+Installe le paquet jq.
+```
+
+Expected: Wilai calls `think`, then proposes
+`script.run.privileged` with `sudo apt install -y jq`. You SEE the
+full command in a confirm prompt — `[y/N]`. Answer `y` → apt
+runs with network + sudo. Answer `n` → refused, audit records
+"user declined".
+
+### Audit trail check
+
+After any of the above, in another terminal:
+
+```bash
+sudo tail -30 /var/lib/wilai/.local/share/wilai/audit/*.jsonl
+```
+
+You should see:
+- `PlanDeclared` (from `think`)
+- `ToolCall` (the script.run invocation with full source)
+- `ToolResult` (sandbox exit + output snippet)
+- `ToolConfirm` (for the privileged variant)
+- `ToolDeny` (if a deny-pattern refused the script)
+
+Every step is replayable.
+
+### Config knob
+
+To fully disable `script.run.privileged` (recommended on
+production hosts), edit `/etc/wilai/config.toml`:
+
+```toml
+[security]
+# allow_privileged_script = true  # opt-in; false by default
+```
+
+With it off, the LLM gets "tool not available" if it tries to
+call the privileged variant. Only `script.run` (sandboxed) stays
+callable.
+
 ## 11. If something fails
 
 | Symptom | Where to look |

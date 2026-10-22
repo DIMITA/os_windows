@@ -11,6 +11,7 @@ pub async fn dispatch(name: &str, args: &Value) -> Result<String> {
         "sysinfo.get.v1" => sysinfo_get(args).await,
         "script.run.v1" => script_run(args, false).await,
         "script.run.privileged.v1" => script_run(args, true).await,
+        "think.v1" => think(args).await,
         other => Err(anyhow!("unknown builtin: {other}")),
     }
 }
@@ -27,6 +28,37 @@ pub async fn dispatch(name: &str, args: &Value) -> Result<String> {
 ///   The daemon layer wraps this with a mandatory confirm + the
 ///   `[security] allow_privileged_script` config gate — this
 ///   function trusts its caller enforced those.
+/// `think` — pure reasoning declaration, no side effects. The LLM
+/// writes down a short rationale + an ordered plan; the daemon
+/// logs it to the audit as PlanDeclared (via the normal
+/// ServerEvent::ToolCall → ToolResult path, since this is a
+/// regular builtin). Returning "noted" lets the agent loop proceed
+/// to the next decision in the same turn.
+async fn think(args: &Value) -> Result<String> {
+    let reason = args
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let plan: Vec<String> = args
+        .get("plan")
+        .and_then(|v| v.as_array())
+        .map(|a| {
+            a.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    // The reason + plan are already in the ToolCall's args, which the
+    // audit layer records verbatim; return a short ack so the model
+    // keeps going.
+    let plan_count = plan.len();
+    Ok(format!(
+        "noted ({} chars reason, {} step(s) planned)",
+        reason.len(),
+        plan_count
+    ))
+}
+
 async fn script_run(args: &Value, privileged: bool) -> Result<String> {
     let interpreter = args
         .get("interpreter")
