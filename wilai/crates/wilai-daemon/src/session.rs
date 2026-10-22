@@ -552,9 +552,25 @@ pub async fn run_turn_with_role(
                             output: text.clone(),
                         })
                         .await;
+                    // Empty output confuses LLMs — they tend to reply
+                    // "the tool returned nothing, please clarify". Wrap
+                    // it in a hint so the model recommends retrying
+                    // without the filter OR reports "no matches" to
+                    // the user.
+                    let for_history = if text.trim().is_empty() {
+                        format!(
+                            "(tool `{}` exited OK but produced no output — \
+                             the filter/args likely matched zero rows. \
+                             Either retry with no filter, or tell the user \
+                             nothing matched.)",
+                            tc.name
+                        )
+                    } else {
+                        text
+                    };
                     history.push(Message {
                         role: MessageRole::Tool,
-                        content: text,
+                        content: for_history,
                         tool_call_id: Some(tc.id.clone()),
                         tool_calls: vec![],
                     });
