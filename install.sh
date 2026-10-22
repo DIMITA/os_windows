@@ -9,12 +9,27 @@
 # membership, daemon start, verification.
 #
 # Default LLM model: qwen2.5:3b (~2 GB RAM, strong multilingual, good
-# at tool-call JSON). Fits on an 8 GB system with room to spare.
+# at tool-call JSON). Fits on an 8 GB system with room to spare, but
+# needs 4+ CPU cores to feel snappy on CPU-only (no GPU).
+#
+# Low-end hardware? Two escape hatches:
+#
+#   WILAI_SMALL_MODEL=1       use qwen2.5:0.5b (~500 MB, lightning fast
+#                             even on 1 vCPU — tool-call quality drops
+#                             a bit, but totally usable for sys.*).
+#   WILAI_REMOTE_OLLAMA=URL   skip the local Ollama install entirely.
+#                             Wilai points at a remote Ollama endpoint
+#                             you already run on a stronger machine
+#                             (homelab, LAN desktop, VPS). The local
+#                             .deb + config get installed, no models
+#                             pulled, no RAM/CPU pressure for LLM
+#                             inference. Example:
+#                               WILAI_REMOTE_OLLAMA=http://192.168.1.42:11434
 #
 # Opt-in extras (flip the env var to any value):
 #   WILAI_WITH_MISTRAL=1   also pulls mistral:7b-instruct (~4.5 GB) for
 #                          higher-quality responses — needs 12+ GB RAM
-#                          to stay comfortable alongside the OS.
+#                          and 4+ CPUs or a GPU to stay snappy.
 #   WILAI_WITH_VISION=1    also pulls llava:7b (~4.5 GB) for screen vision
 #   WILAI_WITH_VOICE=1     installs whisper.cpp + piper-tts binaries +
 #                          downloads a whisper base model and a piper
@@ -87,8 +102,22 @@ apt-get install -y -qq \
     >/dev/null
 ok "apt deps installed"
 
+# Pick the default LLM: qwen2.5:0.5b on tiny CPUs if asked, else 3b.
+DEFAULT_MODEL="qwen2.5:3b"
+if [ "${WILAI_SMALL_MODEL:-0}" = 1 ]; then
+    DEFAULT_MODEL="qwen2.5:0.5b"
+    say "WILAI_SMALL_MODEL=1 — using $DEFAULT_MODEL (fast, lower quality)."
+fi
+
 #─── 2. Ollama (local LLM runtime) ───────────────────────────────
-if command -v ollama >/dev/null 2>&1; then
+if [ -n "${WILAI_REMOTE_OLLAMA:-}" ]; then
+    say "Using remote Ollama at $WILAI_REMOTE_OLLAMA — not installing a local one."
+    # Verify we can reach the remote so we don't ship a broken config.
+    if ! curl -fsS "${WILAI_REMOTE_OLLAMA%/}/api/tags" >/dev/null 2>&1; then
+        die "cannot reach $WILAI_REMOTE_OLLAMA/api/tags — check the host is reachable and listening on 0.0.0.0"
+    fi
+    ok "remote Ollama reachable"
+elif command -v ollama >/dev/null 2>&1; then
     ok "ollama already present ($(ollama --version 2>&1 | head -1))"
 else
     say "Installing Ollama (local LLM runtime)..."
@@ -109,10 +138,13 @@ else
 fi
 
 #─── 3. Pull LLM models (foreground, user sees progress) ─────────
-if [ "${WILAI_NO_MODELS:-0}" = 0 ]; then
-    say "Pulling qwen2.5:3b (~2 GB — Ollama shows its own progress bar)..."
-    sudo -u "${SUDO_USER:-root}" ollama pull qwen2.5:3b
-    ok "qwen2.5:3b ready (default LLM)"
+# Skip when using a remote Ollama (models live on the remote).
+if [ -n "${WILAI_REMOTE_OLLAMA:-}" ]; then
+    say "Remote Ollama — assuming $DEFAULT_MODEL + nomic-embed-text are already pulled there."
+elif [ "${WILAI_NO_MODELS:-0}" = 0 ]; then
+    say "Pulling $DEFAULT_MODEL (Ollama shows its own progress bar)..."
+    sudo -u "${SUDO_USER:-root}" ollama pull "$DEFAULT_MODEL"
+    ok "$DEFAULT_MODEL ready (default LLM)"
 
     say "Pulling nomic-embed-text (~250 MB)..."
     sudo -u "${SUDO_USER:-root}" ollama pull nomic-embed-text
@@ -233,6 +265,10 @@ say "Installing Wilai..."
 apt-get install -y -qq "$DEB" >/dev/null
 ok "wilai installed"
 
+#─── 4b. Patch config for WILAI_SMALL_MODEL / WILAI_REMOTE_OLLAMA ──
+# Must run before the config seeding below if the config doesn't
+# exist yet, so we leave a note and finalize it after the seed step.
+
 #─── 5. Seed default config if none exists (v1.0.0 .deb bug) ────
 # The v1.0.0 .deb postinst did not create /etc/wilai/config.toml,
 # so the daemon tripped on empty defaults — prompts went nowhere.
@@ -248,6 +284,19 @@ fi
 install -d -o wilai -g wilai -m 0750 /var/lib/wilai/.config/wilai
 if [ -f /etc/wilai/config.toml ] && [ ! -e /var/lib/wilai/.config/wilai/wilai.toml ]; then
     ln -sf /etc/wilai/config.toml /var/lib/wilai/.config/wilai/wilai.toml
+fi
+
+# Apply model + remote overrides. Idempotent, re-runnable.
+if [ -f /etc/wilai/config.toml ]; then
+    # Model switch: WILAI_SMALL_MODEL=1 → qwen2.5:0.5b. Also persist
+    # it on re-runs so an upgrade installer with the flag updates the
+    # config in place.
+    sed -i "s|^default_model.*|default_model     = \"${DEFAULT_MODEL}\"|" /etc/wilai/config.toml
+    # Remote Ollama endpoint.
+    if [ -n "${WILAI_REMOTE_OLLAMA:-}" ]; then
+        sed -i "s|^url   = \"http://127.0.0.1:11434\"|url   = \"${WILAI_REMOTE_OLLAMA}\"|" /etc/wilai/config.toml
+        ok "config: pointed [providers.ollama] at $WILAI_REMOTE_OLLAMA"
+    fi
 fi
 
 #─── 6. Add invoking user to the wilai group ─────────────────────
