@@ -1,6 +1,11 @@
 [general]
 default_provider  = "ollama"
-default_model     = "mistral:7b-instruct"
+# qwen2.5:3b — 2 GB RAM, strong multilingual (French included), good at
+# tool-call JSON. Fits comfortably on an 8 GB system. For higher quality
+# at the cost of RAM, bump to mistral:7b-instruct (4.5 GB), llama3.1:8b
+# (5 GB) or qwen2.5:7b (5 GB). Pull the model you want with
+# `ollama pull <name>` and set it here.
+default_model     = "qwen2.5:3b"
 confirm_timeout_s = 30
 
 [providers.ollama]

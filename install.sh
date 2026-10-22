@@ -8,7 +8,13 @@
 # model downloads (foreground — you see progress), .deb install, group
 # membership, daemon start, verification.
 #
+# Default LLM model: qwen2.5:3b (~2 GB RAM, strong multilingual, good
+# at tool-call JSON). Fits on an 8 GB system with room to spare.
+#
 # Opt-in extras (flip the env var to any value):
+#   WILAI_WITH_MISTRAL=1   also pulls mistral:7b-instruct (~4.5 GB) for
+#                          higher-quality responses — needs 12+ GB RAM
+#                          to stay comfortable alongside the OS.
 #   WILAI_WITH_VISION=1    also pulls llava:7b (~4.5 GB) for screen vision
 #   WILAI_WITH_VOICE=1     installs whisper.cpp + piper-tts binaries +
 #                          downloads a whisper base model and a piper
@@ -104,13 +110,19 @@ fi
 
 #─── 3. Pull LLM models (foreground, user sees progress) ─────────
 if [ "${WILAI_NO_MODELS:-0}" = 0 ]; then
-    say "Pulling mistral:7b-instruct (~4 GB — Ollama shows its own progress bar)..."
-    sudo -u "${SUDO_USER:-root}" ollama pull mistral:7b-instruct
-    ok "mistral:7b-instruct ready"
+    say "Pulling qwen2.5:3b (~2 GB — Ollama shows its own progress bar)..."
+    sudo -u "${SUDO_USER:-root}" ollama pull qwen2.5:3b
+    ok "qwen2.5:3b ready (default LLM)"
 
     say "Pulling nomic-embed-text (~250 MB)..."
     sudo -u "${SUDO_USER:-root}" ollama pull nomic-embed-text
     ok "nomic-embed-text ready"
+
+    if [ "${WILAI_WITH_MISTRAL:-0}" = 1 ]; then
+        say "Pulling mistral:7b-instruct (~4.5 GB — opt-in via WILAI_WITH_MISTRAL=1)..."
+        sudo -u "${SUDO_USER:-root}" ollama pull mistral:7b-instruct
+        ok "mistral:7b-instruct ready"
+    fi
 
     if [ "${WILAI_WITH_VISION:-0}" = 1 ]; then
         say "Pulling llava:7b (~4.5 GB — opt-in via WILAI_WITH_VISION=1)..."
