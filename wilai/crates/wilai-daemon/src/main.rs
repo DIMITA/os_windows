@@ -124,6 +124,7 @@ async fn main() -> Result<()> {
         nudges: nudge_tx,
         project: wilai_pentest::project::empty_handle(),
         project_store: Arc::new(tokio::sync::RwLock::new(None)),
+        loaded_models: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
     });
 
     // Prewarm the default model so the first user prompt doesn't eat
@@ -158,6 +159,9 @@ async fn main() -> Result<()> {
 
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);
     tracing::info!(socket = %socket_path.display(), "binding socket");
+    // Keep an Arc clone of the service for the shutdown handler; the
+    // SocketServer takes ownership of the main one.
+    let shutdown_service = Arc::clone(&service);
     let server = SocketServer::bind(&socket_path, service).await?;
 
     tokio::select! {
@@ -174,6 +178,27 @@ async fn main() -> Result<()> {
     if let Some(h) = auto_detect_handle {
         h.abort();
     }
+
+    // Unload every model the daemon loaded during its lifetime, so
+    // RAM is freed immediately on `systemctl stop wilai-daemon`
+    // instead of waiting for Ollama's 5-min keep_alive. Best-effort;
+    // each call has a 5s timeout, failures are logged at debug.
+    let loaded = shutdown_service
+        .loaded_models
+        .read()
+        .await
+        .iter()
+        .cloned()
+        .collect::<Vec<_>>();
+    if !loaded.is_empty() {
+        tracing::info!(count = loaded.len(), "unloading models before exit");
+        for (provider_name, model) in loaded {
+            shutdown_service
+                .unload_model_from_provider(&provider_name, &model)
+                .await;
+        }
+    }
+
     let _ = std::fs::remove_file(&socket_path);
     drop(audit_handle);
     Ok(())

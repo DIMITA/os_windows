@@ -41,6 +41,12 @@ pub struct Service {
     /// Project-local SQLite store (findings, targets). Opened by
     /// pt.project.start alongside the project.
     pub project_store: Arc<tokio::sync::RwLock<Option<Arc<wilai_pentest::ProjectStore>>>>,
+    /// (provider_name, model) pairs any session has prompted with
+    /// during this daemon's lifetime. Collected per session, drained
+    /// by the daemon's shutdown handler to unload every warm model
+    /// before exit — so `systemctl stop wilai-daemon` actually frees
+    /// RAM instead of waiting for Ollama's keep_alive to time out.
+    pub loaded_models: Arc<tokio::sync::RwLock<std::collections::HashSet<(String, String)>>>,
 }
 
 impl Service {

@@ -58,6 +58,7 @@ async fn in_process_service() -> (Arc<Service>, TempDir) {
         nudges: tokio::sync::broadcast::channel(16).0,
         project: wilai_pentest::project::empty_handle(),
         project_store: Arc::new(tokio::sync::RwLock::new(None)),
+        loaded_models: Arc::new(tokio::sync::RwLock::new(std::collections::HashSet::new())),
     });
     (service, tmp)
 }

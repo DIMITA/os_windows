@@ -116,9 +116,13 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         pending: pending.clone(),
     });
     let mut history: Vec<Message> = Vec::new();
-    // Track (provider_name, model) pairs this session has loaded, so we
-    // can tell Ollama to drop them from RAM when the session ends.
-    let mut touched_models: std::collections::HashSet<(String, String)> = std::collections::HashSet::new();
+    // Track (provider_name, model) pairs this session loaded, so the
+    // Service can list what to unload on daemon shutdown. We DO NOT
+    // unload at session end — that would defeat the prewarm (next
+    // shell would re-pay the cold-start cost). Ollama's 5-min
+    // keep_alive is the right fallback for idle periods between
+    // shells; `systemctl stop wilai-daemon` is what truly frees RAM.
+    let touched_sink = service.loaded_models.clone();
     let system_prompt = {
         let reg = service.registry.read().await;
         build_system_prompt_with_persona(
@@ -264,7 +268,10 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
             ClientOp::Prompt { text, model, provider } => {
                 let model = model.unwrap_or(service.default_model.clone());
                 let provider_name = provider.unwrap_or(service.default_provider.clone());
-                touched_models.insert((provider_name.clone(), model.clone()));
+                touched_sink
+                    .write()
+                    .await
+                    .insert((provider_name.clone(), model.clone()));
                 let provider = match service.build_provider(&provider_name).await {
                     Ok(p) => p,
                     Err(e) => {
@@ -301,12 +308,9 @@ pub async fn run_session(stream: UnixStream, service: Arc<Service>) -> Result<()
         }
     };
 
-    // Session ended — free any Ollama models this session loaded, so
-    // the VM gets its RAM back instead of waiting for OLLAMA_KEEP_ALIVE
-    // (5 min by default). Best-effort, bounded by a 5s timeout each.
-    for (provider_name, model) in touched_models {
-        service.unload_model_from_provider(&provider_name, &model).await;
-    }
+    // Session end does NOT unload the model — that's done once on
+    // daemon shutdown (see main.rs). Open/close/open on the same
+    // shell is instant because the model stays warm.
 
     let _ = service
         .audit_tx
