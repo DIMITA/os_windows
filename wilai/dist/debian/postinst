@@ -21,6 +21,18 @@ case "$1" in
         # as root.
         install -d -m 0750 -o wilai -g wilai /var/lib/wilai
         install -d -m 0755 -o wilai -g wilai /var/lib/wilai/models
+
+        # Seed the default config. The daemon runs as `wilai` and
+        # resolves config via (in order): $WILAI_CONFIG → the user's
+        # XDG config → /etc/wilai/config.toml. We drop a copy at
+        # /etc/wilai/config.toml so a fresh install has a working
+        # LLM provider (ollama + mistral:7b-instruct) out of the box.
+        # Does NOT overwrite an existing config.
+        install -d -m 0755 /etc/wilai
+        if [ ! -f /etc/wilai/config.toml ]; then
+            install -m 0644 /usr/share/wilai/wilai.toml.example \
+                            /etc/wilai/config.toml
+        fi
         if [ ! -f /var/lib/wilai/models/README ]; then
             cat > /var/lib/wilai/models/README <<'EOF'
 Drop a whisper.cpp model (e.g. ggml-base.en.bin) and a piper voice

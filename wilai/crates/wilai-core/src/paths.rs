@@ -7,7 +7,23 @@ pub fn config_dir() -> Result<PathBuf> {
 }
 
 pub fn config_file() -> Result<PathBuf> {
-    Ok(config_dir()?.join("wilai.toml"))
+    // 1. Explicit override via WILAI_CONFIG env var.
+    if let Ok(p) = std::env::var("WILAI_CONFIG") {
+        return Ok(PathBuf::from(p));
+    }
+    // 2. Per-user XDG config.
+    let user = config_dir()?.join("wilai.toml");
+    if user.exists() {
+        return Ok(user);
+    }
+    // 3. System-wide fallback (shipped by the .deb postinst).
+    let system = PathBuf::from("/etc/wilai/config.toml");
+    if system.exists() {
+        return Ok(system);
+    }
+    // 4. None found yet — return the per-user path so the error
+    //    message names a sensible location.
+    Ok(user)
 }
 
 pub fn data_dir() -> Result<PathBuf> {

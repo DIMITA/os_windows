@@ -195,6 +195,23 @@ if [ -S /run/wilai/wilai.sock ] && [ ! -e /run/wilai.sock ]; then
     chmod 0660 /run/wilai/wilai.sock 2>/dev/null || true
 fi
 
+#─── 5b. Seed default config if none exists (v1.0.0 .deb bug) ────
+# The v1.0.0 .deb postinst did not create /etc/wilai/config.toml,
+# so the daemon tripped on empty defaults — prompts went nowhere.
+# Fixed in the next release's postinst; back-fill it here for
+# anyone on v1.0.0.
+install -d -m 0755 /etc/wilai
+if [ ! -f /etc/wilai/config.toml ] && [ -f /usr/share/wilai/wilai.toml.example ]; then
+    install -m 0644 /usr/share/wilai/wilai.toml.example /etc/wilai/config.toml
+    say "seeded /etc/wilai/config.toml from the shipped example"
+fi
+# Make it visible to the daemon's XDG resolver too (which looks under
+# /var/lib/wilai/.config/wilai/ since that's $HOME for the wilai user).
+install -d -o wilai -g wilai -m 0750 /var/lib/wilai/.config/wilai
+if [ -f /etc/wilai/config.toml ] && [ ! -e /var/lib/wilai/.config/wilai/wilai.toml ]; then
+    ln -sf /etc/wilai/config.toml /var/lib/wilai/.config/wilai/wilai.toml
+fi
+
 #─── 6. Add invoking user to the wilai group ─────────────────────
 # The .deb postinst already does this via SUDO_USER, but if the
 # installer was launched any other way (bare root, sudo -E stripping
