@@ -129,31 +129,36 @@ else
     REL_API="https://api.github.com/repos/${REPO}/releases/latest"
 fi
 
-say "Looking for a prebuilt Wilai release..."
-REL_JSON=$(mktemp)
-HTTP=$(curl -sS -o "$REL_JSON" -w "%{http_code}" "$REL_API" || echo 000)
 DEB_URL=""
-if [ "$HTTP" = 200 ]; then
-    DEB_URL=$(python3 -c "
+if [ "${WILAI_FROM_SOURCE:-0}" = 1 ]; then
+    warn "WILAI_FROM_SOURCE=1 — skipping release lookup, building from main."
+    FALLBACK_SOURCE=1
+else
+    say "Looking for a prebuilt Wilai release..."
+    REL_JSON=$(mktemp)
+    HTTP=$(curl -sS -o "$REL_JSON" -w "%{http_code}" "$REL_API" || echo 000)
+    if [ "$HTTP" = 200 ]; then
+        DEB_URL=$(python3 -c "
 import json, re
 with open('$REL_JSON') as f: rel = json.load(f)
 for a in rel.get('assets', []):
     if re.search(r'wilai_.*_${ARCH}\.deb\$', a['name']):
         print(a['browser_download_url']); break
 " 2>/dev/null || true)
-fi
-rm -f "$REL_JSON"
-
-if [ -z "$DEB_URL" ]; then
-    if [ "$HTTP" = 404 ]; then
-        warn "no tagged release on GitHub yet — falling back to source build."
-    else
-        warn "no prebuilt .deb for ${ARCH} on this release (HTTP $HTTP) — building from source."
     fi
-    warn "source build needs ~5 min + ~2 GB RAM."
-    FALLBACK_SOURCE=1
-else
-    FALLBACK_SOURCE=0
+    rm -f "$REL_JSON"
+
+    if [ -z "$DEB_URL" ]; then
+        if [ "$HTTP" = 404 ]; then
+            warn "no tagged release on GitHub yet — falling back to source build."
+        else
+            warn "no prebuilt .deb for ${ARCH} on this release (HTTP $HTTP) — building from source."
+        fi
+        warn "source build needs ~5 min + ~2 GB RAM."
+        FALLBACK_SOURCE=1
+    else
+        FALLBACK_SOURCE=0
+    fi
 fi
 
 if [ "$FALLBACK_SOURCE" = 1 ]; then
