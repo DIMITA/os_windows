@@ -413,19 +413,27 @@ pub struct General {
     pub confirm_timeout_s: u32,
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// Load the default model into Ollama RAM at daemon startup so the
+    /// first user prompt doesn't eat the 10-30s cold-start cost. True
+    /// by default; set false if the daemon shares Ollama with other
+    /// clients that prefer to pay the cost lazily.
+    #[serde(default = "default_prewarm")]
+    pub prewarm_default_model: bool,
 }
 
 fn default_provider_name() -> String { "ollama".to_string() }
-fn default_model_name() -> String { "mistral:7b-instruct".to_string() }
+fn default_model_name() -> String { "qwen2.5:3b".to_string() }
 fn default_confirm_timeout_s() -> u32 { 30 }
+fn default_prewarm() -> bool { true }
 
 impl Default for General {
     fn default() -> Self {
         Self {
             default_provider: "ollama".to_string(),
-            default_model: "mistral:7b-instruct".to_string(),
+            default_model: "qwen2.5:3b".to_string(),
             confirm_timeout_s: 30,
             system_prompt: None,
+            prewarm_default_model: true,
         }
     }
 }

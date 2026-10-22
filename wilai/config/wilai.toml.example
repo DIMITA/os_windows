@@ -7,6 +7,10 @@ default_provider  = "ollama"
 # `ollama pull <name>` and set it here.
 default_model     = "qwen2.5:3b"
 confirm_timeout_s = 30
+# Load the default model into Ollama RAM at daemon startup, so the first
+# prompt skips the 10-30s cold load. Set false if this daemon shares
+# Ollama with another client that prefers lazy loading.
+prewarm_default_model = true
 
 [providers.ollama]
 type  = "ollama"

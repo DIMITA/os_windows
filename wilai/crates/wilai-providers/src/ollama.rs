@@ -50,6 +50,32 @@ impl OllamaProvider {
     }
 
     pub fn base_url(&self) -> &str { &self.base_url }
+
+    /// Prewarm a model by loading it into Ollama's RAM with a long
+    /// keep_alive, so the first real prompt skips the cold-start.
+    /// POSTs an empty prompt — Ollama loads the model and returns
+    /// immediately without generating tokens.
+    pub async fn prewarm(&self, model: &str) -> Result<()> {
+        let url = format!("{}/api/generate", self.base_url.trim_end_matches('/'));
+        let body = serde_json::json!({
+            "model": model,
+            "prompt": "",
+            "stream": false,
+            // Hold the model in RAM for 10 min; subsequent prompts refresh it.
+            "keep_alive": "10m",
+        });
+        // Longer timeout than unload — the model might take 30s+ to load
+        // on a cold Ollama with a chunky model.
+        let slow = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()?;
+        slow.post(&url)
+            .json(&body)
+            .send()
+            .await
+            .with_context(|| format!("POST {url}"))?;
+        Ok(())
+    }
 }
 
 #[derive(Serialize)]

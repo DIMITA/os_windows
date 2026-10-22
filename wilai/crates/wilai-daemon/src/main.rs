@@ -126,6 +126,36 @@ async fn main() -> Result<()> {
         project_store: Arc::new(tokio::sync::RwLock::new(None)),
     });
 
+    // Prewarm the default model so the first user prompt doesn't eat
+    // the 10-30s cold-start cost. Non-blocking: spawn a task, bind the
+    // socket in parallel so shells can connect while the model loads.
+    if cfg.general.prewarm_default_model {
+        let svc = Arc::clone(&service);
+        tokio::spawn(async move {
+            let provider_name = svc.default_provider.clone();
+            let model = svc.default_model.clone();
+            tracing::info!(provider = %provider_name, model = %model, "prewarming default model");
+            let t0 = std::time::Instant::now();
+            if let Some(pcfg) = svc.cfg.providers.get(&provider_name) {
+                if pcfg.kind == "ollama" {
+                    let url = pcfg
+                        .url
+                        .clone()
+                        .unwrap_or_else(|| "http://127.0.0.1:11434".to_string());
+                    if let Ok(provider) = wilai_providers::OllamaProvider::new(&provider_name, url) {
+                        match provider.prewarm(&model).await {
+                            Ok(_) => tracing::info!(
+                                elapsed_ms = t0.elapsed().as_millis() as u64,
+                                "model prewarmed, ready for prompts"
+                            ),
+                            Err(e) => tracing::warn!("prewarm failed (first prompt will be slow): {e:#}"),
+                        }
+                    }
+                }
+            }
+        });
+    }
+
     let socket_path = cli.socket.unwrap_or(default_socket_path()?);
     tracing::info!(socket = %socket_path.display(), "binding socket");
     let server = SocketServer::bind(&socket_path, service).await?;
