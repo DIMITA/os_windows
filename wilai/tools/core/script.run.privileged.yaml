@@ -1,0 +1,65 @@
+name: script.run.privileged
+version: 1
+description: >
+  Run a short script OUTSIDE the strict sandbox. Writable $HOME +
+  /tmp, network allowed, sudo callable (if the daemon user is in
+  sudoers). ALWAYS asks for user confirmation. Use ONLY when the
+  task genuinely needs persistence, network, or elevation —
+  everything else should use `script.run`.
+  Deny-pattern scan still applies (rm -rf /, dd on block devices,
+  fork bomb, mkfs, etc.) — those cannot be run even with confirm.
+  Forbidden in pentest mode.
+  Gated by `[security] allow_privileged_script = true` in the
+  daemon config. The daemon refuses this tool outright when the
+  config knob is false (default), so an LLM calling it on an
+  unprepared host gets a clear "not allowed" error.
+category: destructive
+risk: critical
+mode_forbidden: pentest
+
+inputs:
+  interpreter:
+    type: enum
+    required: false
+    values: [bash, sh, python3]
+    default: bash
+    description: Which interpreter runs the source.
+  source:
+    type: string
+    required: true
+    description: >
+      The script body. Must do what the user actually asked.
+  timeout_s:
+    type: integer
+    required: false
+    min: 1
+    max: 120
+    default: 30
+    description: Hard wall-clock cap in seconds (1-120).
+
+guards:
+  - if: "always"
+    confirm: "Run privileged script? (writable $HOME + network + sudo)\n--- script ---\n{source}\n--- end ---"
+
+executor:
+  type: builtin
+  fn: script.run.privileged.v1
+  timeout_s: 125
+  output:
+    capture: both
+    max_bytes: 262144
+
+audit:
+  fields: [interpreter, source, timeout_s]
+
+examples:
+  - args:
+      source: "sudo apt update && sudo apt install -y jq"
+    note: "Install a package — needs sudo + network."
+  - args:
+      interpreter: python3
+      source: |
+        import urllib.request, json
+        with urllib.request.urlopen("https://api.ipify.org?format=json") as r:
+            print(json.load(r))
+    note: "Fetch public IP — needs network."

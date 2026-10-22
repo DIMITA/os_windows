@@ -9,8 +9,115 @@ pub async fn dispatch(name: &str, args: &Value) -> Result<String> {
         "fs.list.v1" => fs_list(args).await,
         "fs.write.v1" => fs_write(args).await,
         "sysinfo.get.v1" => sysinfo_get(args).await,
+        "script.run.v1" => script_run(args, false).await,
+        "script.run.privileged.v1" => script_run(args, true).await,
         other => Err(anyhow!("unknown builtin: {other}")),
     }
+}
+
+/// LLM-authored script execution.
+///
+/// `privileged = false`: bubblewrap-sandboxed, read-only /, no
+///   network, writable /tmp only, 30s default timeout, 256 KiB
+///   output cap. Deny-pattern scan refuses obvious destructive
+///   commands before dispatch.
+///
+/// `privileged = true`: sandbox relaxed (writable $HOME + /tmp,
+///   network allowed, sudo callable). Still deny-pattern scanned.
+///   The daemon layer wraps this with a mandatory confirm + the
+///   `[security] allow_privileged_script` config gate — this
+///   function trusts its caller enforced those.
+async fn script_run(args: &Value, privileged: bool) -> Result<String> {
+    let interpreter = args
+        .get("interpreter")
+        .and_then(|v| v.as_str())
+        .unwrap_or("bash");
+    let source = args
+        .get("source")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("script.run: `source` missing"))?;
+    let timeout_s = args
+        .get("timeout_s")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30)
+        .min(120)
+        .max(1) as u64;
+
+    // Interpreter whitelist. "bash" and "sh" always available; "python3"
+    // only if present on the host.
+    let (bin, args_pre) = match interpreter {
+        "bash" => ("/bin/bash", vec!["-c".to_string()]),
+        "sh" => ("/bin/sh", vec!["-c".to_string()]),
+        "python3" => ("/usr/bin/python3", vec!["-I".to_string(), "-c".to_string()]),
+        other => return Err(anyhow!("script.run: interpreter `{other}` not supported (bash|sh|python3)")),
+    };
+    if !std::path::Path::new(bin).exists() {
+        return Err(anyhow!("script.run: interpreter {bin} not installed on host"));
+    }
+
+    // 1. Deny-pattern scan — belt + braces around the sandbox.
+    crate::deny::scan(source)?;
+
+    // 2. Build the sandbox spec. Sandboxed path = read-only / with
+    //    nothing writable but a per-run tmpfs for /tmp. Privileged
+    //    path = bind the user's $HOME writable + allow network.
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/root".to_string());
+    let sandbox = if privileged {
+        crate::spec::SandboxSpec::Bwrap {
+            bind_ro: vec!["/usr".into(), "/etc".into(), "/bin".into(), "/sbin".into(), "/lib".into(), "/lib64".into(), "/opt".into()],
+            bind_rw: vec!["/tmp".into(), home.clone()],
+            tmpfs: vec![],
+            network: true,
+            pass_env: vec!["HOME".into(), "USER".into(), "PATH".into(), "LANG".into()],
+        }
+    } else {
+        crate::spec::SandboxSpec::Bwrap {
+            bind_ro: vec!["/usr".into(), "/etc".into(), "/bin".into(), "/sbin".into(), "/lib".into(), "/lib64".into(), "/opt".into()],
+            bind_rw: vec![],   // nothing writable outside the tmpfs below
+            tmpfs: vec!["/tmp".into(), "/home".into(), "/root".into()],
+            network: false,
+            pass_env: vec!["PATH".into(), "LANG".into()],
+        }
+    };
+
+    // 3. Render the argv under bwrap. render_argv prepends --unshare-pid,
+    //    --unshare-ipc, --die-with-parent, etc.
+    let mut argv_in: Vec<String> = args_pre;
+    argv_in.push(source.to_string());
+    let argv_full = crate::sandbox::render_argv(bin, &argv_in, Some(&sandbox));
+    let bwrap_bin = argv_full[0].clone();
+    let bwrap_args: Vec<String> = argv_full[1..].to_vec();
+
+    // 4. Run with timeout + output cap.
+    use tokio::process::Command;
+    use tokio::time::{timeout, Duration};
+    let output = timeout(
+        Duration::from_secs(timeout_s),
+        Command::new(&bwrap_bin)
+            .args(&bwrap_args)
+            .output(),
+    )
+    .await
+    .map_err(|_| anyhow!("script.run: timed out after {timeout_s}s"))?
+    .context("script.run: spawn failed")?;
+
+    const MAX_OUT: usize = 256 * 1024;
+    let mut out = String::new();
+    out.push_str(&String::from_utf8_lossy(&output.stdout));
+    if !output.stderr.is_empty() {
+        if !out.is_empty() { out.push('\n'); }
+        out.push_str("[stderr]\n");
+        out.push_str(&String::from_utf8_lossy(&output.stderr));
+    }
+    if out.len() > MAX_OUT {
+        let kept = &out[..MAX_OUT];
+        out = format!("{kept}\n...(+{} bytes truncated)", out.len() - MAX_OUT);
+    }
+    if !output.status.success() {
+        let code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signalled".to_string());
+        return Err(anyhow!("script exited with status {code}:\n{out}"));
+    }
+    Ok(out)
 }
 
 async fn fs_write(args: &Value) -> Result<String> {

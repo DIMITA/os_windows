@@ -1,0 +1,61 @@
+name: script.run
+version: 1
+description: >
+  Run a short script (bash, sh, or python3) in a strict bubblewrap
+  sandbox. USE THIS when the user asks for something no catalogued
+  tool covers, OR when combining several shell commands is simpler
+  than chaining tool calls.
+  Sandbox: whole filesystem is READ-ONLY, no network, a fresh
+  writable /tmp (lost after the script exits), 256 KiB output cap,
+  30 s default timeout. Nothing persists.
+  Deny-pattern scan refuses obvious destructive snippets outright
+  (rm -rf /, dd on block devices, fork bomb, curl | sh, mkfs, …) —
+  do NOT try to write them, they will be refused and audited.
+  For tasks that NEED network, write under $HOME, or sudo, use
+  `script.run.privileged` instead (requires confirm).
+category: read
+risk: low
+
+inputs:
+  interpreter:
+    type: enum
+    required: false
+    values: [bash, sh, python3]
+    default: bash
+    description: Which interpreter runs the source.
+  source:
+    type: string
+    required: true
+    description: >
+      The script body. Multi-line is fine. Keep it short and
+      focused on ONE task.
+  timeout_s:
+    type: integer
+    required: false
+    min: 1
+    max: 120
+    default: 30
+    description: Hard wall-clock cap in seconds (1-120).
+
+executor:
+  type: builtin
+  fn: script.run.v1
+  timeout_s: 125
+  output:
+    capture: both
+    max_bytes: 262144
+
+audit:
+  fields: [interpreter, source, timeout_s]
+
+examples:
+  - args:
+      source: "find ~ -type f -size +100M -mtime -7"
+    note: "Find files > 100 MB modified in the last 7 days in $HOME."
+  - args:
+      interpreter: python3
+      source: "import socket; print(socket.gethostname())"
+    note: "A one-liner Python query — hostname."
+  - args:
+      source: "ps -ef | awk '{print $8}' | sort -u | head -20"
+    note: "Top 20 unique command names currently running."
