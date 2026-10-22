@@ -1,4 +1,4 @@
-# install.ps1 — one-shot installer for the Wilai Windows bridge.
+﻿# install.ps1 -- one-shot installer for the Wilai Windows bridge.
 #
 # What it does:
 #   1. Copies wilai.ps1 into %LOCALAPPDATA%\Programs\wilai\.
@@ -65,7 +65,7 @@ if ($Uninstall) {
 Write-Step "install directory: $InstallTo"
 New-Item -ItemType Directory -Force -Path $InstallTo | Out-Null
 
-# Prefer the native .exe when it's available next to install.ps1 —
+# Prefer the native .exe when it's available next to install.ps1 --
 # that's what the release zip ships. Fall back to the .ps1 launcher
 # otherwise (useful when hacking in-tree).
 # The release zip ships the binary as either wilai.exe (preferred
@@ -84,11 +84,11 @@ if (Test-Path $exeSrc) {
     Copy-Item -Force $exeSrc $exeDst
     # Strip the Zone.Identifier (Mark-of-the-Web) that Windows attaches
     # to anything downloaded. Without this, double-click or the first
-    # `wilai` call shows "SmartScreen a empêché le démarrage d'une
+    # `wilai` call shows "SmartScreen a empeche le demarrage d'une
     # application non reconnue" and the user has to click through
-    # "More info → Run anyway". Unblocking here is per-user and only
-    # affects this specific file we just copied — same semantics as
-    # right-click → Properties → Unblock in Explorer.
+    # "More info -> Run anyway". Unblocking here is per-user and only
+    # affects this specific file we just copied -- same semantics as
+    # right-click -> Properties -> Unblock in Explorer.
     try { Unblock-File -LiteralPath $exeDst -ErrorAction Stop } catch { }
     # Keep .ps1 beside it for debugging/fallback, don't require it.
     if (Test-Path $ps1Src) {
@@ -97,7 +97,7 @@ if (Test-Path $exeSrc) {
     Write-Host ""
     Write-Host "Note: wilai.exe is not Authenticode-signed (open-source" -ForegroundColor Yellow
     Write-Host "project without a code-signing cert yet). If SmartScreen" -ForegroundColor Yellow
-    Write-Host "ever warns you again, click 'More info' → 'Run anyway'." -ForegroundColor Yellow
+    Write-Host "ever warns you again, click 'More info' -> 'Run anyway'." -ForegroundColor Yellow
     Write-Host ""
 } elseif (Test-Path $ps1Src) {
     Write-Step "installing PowerShell launcher (no wilai.exe found)"
@@ -123,8 +123,8 @@ if (-not (Test-Path $CfgFile)) {
     if ($Mode -eq 'ask') {
         Write-Host ""
         Write-Host "How do you want to reach Wilai?"
-        Write-Host "  1) WSL  — a Linux distro on this machine (Wilai installed inside)"
-        Write-Host "  2) SSH  — a remote Linux box (Wilai installed there)"
+        Write-Host "  1) WSL  -- a Linux distro on this machine (Wilai installed inside)"
+        Write-Host "  2) SSH  -- a remote Linux box (Wilai installed there)"
         $pick = Read-Host "Pick 1 or 2"
         $Mode = switch ($pick.Trim()) { '2' { 'ssh' } default { 'wsl' } }
     }
@@ -133,7 +133,7 @@ if (-not (Test-Path $CfgFile)) {
             if (-not $Distro) { $Distro = Read-Host "WSL distro name (default: WilOS)" }
             if (-not $Distro) { $Distro = 'WilOS' }
             @"
-# Wilai Windows bridge — $(Get-Date -Format o)
+# Wilai Windows bridge -- $(Get-Date -Format o)
 [bridge]
 mode = "wsl"
 
@@ -151,7 +151,7 @@ key  = ""
         'ssh' {
             if (-not $Host) { $Host = Read-Host "SSH target (e.g. wilai@my-box.lan)" }
             @"
-# Wilai Windows bridge — $(Get-Date -Format o)
+# Wilai Windows bridge -- $(Get-Date -Format o)
 [bridge]
 mode = "ssh"
 

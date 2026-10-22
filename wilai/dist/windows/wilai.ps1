@@ -1,23 +1,23 @@
-# wilai.ps1 — Windows-side launcher for Wilai.
+﻿# wilai.ps1 -- Windows-side launcher for Wilai.
 #
 # Wilai (the agent) runs on Linux. This launcher is a thin bridge
 # that dispatches to a Linux Wilai instance via one of two modes:
 #
-#   wsl  — exec wilai-shell inside a configured WSL2 distro
-#   ssh  — exec wilai-shell on a configured remote host via OpenSSH
+#   wsl  -- exec wilai-shell inside a configured WSL2 distro
+#   ssh  -- exec wilai-shell on a configured remote host via OpenSSH
 #
 # Both are stock Windows components (WSL2 since Win10 2004, OpenSSH
-# client since Win10 1809). No service, no tray — this file replaces
+# client since Win10 1809). No service, no tray -- this file replaces
 # the agent on Windows; the real daemon stays on the Linux side.
 #
 # Config: %APPDATA%\wilai\config.toml   (created by install.ps1).
 #
 # Usage:
-#   wilai                      → open the TUI through the configured bridge
-#   wilai --mode wsl           → force WSL mode (overrides config)
-#   wilai --mode ssh           → force SSH mode (overrides config)
-#   wilai --config             → print the resolved config and exit
-#   wilai --help               → show this card
+#   wilai                      -> open the TUI through the configured bridge
+#   wilai --mode wsl           -> force WSL mode (overrides config)
+#   wilai --mode ssh           -> force SSH mode (overrides config)
+#   wilai --config             -> print the resolved config and exit
+#   wilai --help               -> show this card
 
 [CmdletBinding()]
 param(
@@ -36,13 +36,13 @@ function Write-Err([string]$msg) {
 
 function Show-Help {
     @"
-Wilai — Windows bridge launcher
+Wilai -- Windows bridge launcher
 
 The agent runs on Linux. This script forwards you to a Wilai instance
 via one of two bridges:
 
-  wsl  — the configured WSL distro (wsl -d <distro> -- wilai-shell ...)
-  ssh  — the configured SSH target  (ssh wilai@<host>)
+  wsl  -- the configured WSL distro (wsl -d <distro> -- wilai-shell ...)
+  ssh  -- the configured SSH target  (ssh wilai@<host>)
 
 Usage:
   wilai                 open the TUI through the configured bridge
@@ -154,7 +154,7 @@ function Invoke-WslBridge($bridgeCfg, $extraArgs) {
 function Invoke-SshBridge($bridgeCfg, $extraArgs) {
     $ssh = Get-Command ssh.exe -ErrorAction SilentlyContinue
     if (-not $ssh) {
-        Write-Err "ssh.exe not found. Install OpenSSH client: Settings → Apps → Optional Features → OpenSSH Client"
+        Write-Err "ssh.exe not found. Install OpenSSH client: Settings -> Apps -> Optional Features -> OpenSSH Client"
         exit 2
     }
     $target = [string]$bridgeCfg['host']
