@@ -1,19 +1,49 @@
 # Wilai on Windows
 
-Wilai is a Linux agent. On Windows, you don't *install* the agent —
-you install a **bridge** that forwards your terminal to a Linux Wilai
-instance. The real daemon still runs on Linux, where it belongs.
+> **Read this first.** `wilai.exe` is NOT a Windows-native agent.
+> It is a thin **client** that forwards your terminal to a Linux
+> Wilai running elsewhere. Nothing happens on Windows itself.
+>
+> You need a Linux Wilai somewhere. Three honest options:
+>
+> 1. **WSL** — install Ubuntu (or any WSL distro) + Wilai inside it.
+>    `wilai.exe` dispatches to `wsl.exe -- wilai-shell`. Fast,
+>    local, no network.
+> 2. **SSH to a Linux box** — a VirtualBox VM you already run, a
+>    homelab, a VPS. `wilai.exe` dispatches to `ssh wilai@host`.
+>    Reuse what you have.
+> 3. **Boot the WilOS live ISO** — turn your machine into a Linux
+>    Wilai directly. Native experience (TUI + HUD + voice).
+>
+> If none of the three is set up, `wilai.exe` will error with "no
+> SSH host configured" or "no WSL distro found". That is working
+> as intended, not a bug — the Windows binary alone cannot run
+> the agent.
 
-Two bridge modes, both using stock Windows components:
+## Why not a Windows-native Wilai?
 
-- **WSL** — Wilai runs inside a WSL2 distro you already use (Ubuntu,
-  Arch, WilOS-in-WSL, …). Fast, no network, zero extra deps.
+The daemon is Linux-first by design: Unix sockets, systemd,
+apt/pacman tools, bubblewrap sandboxing, SO_PEERCRED auth,
+chattr-based audit append-only, Wayland HUD. Porting that to
+Windows would mean rewriting ~80% of the tool catalogue (apt →
+winget, systemctl → sc.exe, nmcli → netsh, …) plus the entire
+security model. That's a separate project, not on this roadmap.
+
+If you need a Windows-native AI agent, Wilai isn't the right
+fit. If you have (or can set up) a Linux box, the bridge
+below gives you the same TUI from Windows.
+
+## Bridge modes
+
+- **WSL** — Wilai runs inside a WSL2 distro you already use
+  (Ubuntu, Arch, WilOS-in-WSL, …). Fast, no network, zero extra
+  deps once the distro exists.
 - **SSH** — Wilai runs on a remote Linux box (homelab, VPS, dev
-  server). Uses OpenSSH client, built into Windows 10 1809+.
+  server, a VM on the same host). Uses OpenSSH client, built into
+  Windows 10 1809+.
 
-Pick what fits. You can switch any time by editing
-`%APPDATA%\wilai\config.toml` or passing `--mode wsl` / `--mode ssh`
-on the command line.
+Switch any time by editing `%APPDATA%\wilai\config.toml` or
+passing `--mode wsl` / `--mode ssh` on the command line.
 
 ## Install
 
