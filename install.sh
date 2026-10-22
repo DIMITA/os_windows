@@ -35,6 +35,16 @@
 #                          downloads a whisper base model and a piper
 #                          English voice (~400 MB total). Enables voice
 #                          in the default config.
+#   WILAI_QUANT=q3         use an aggressive-quant variant of the default
+#                          model (e.g. qwen2.5:3b-instruct-q3_K_M). +25%
+#                          inference speed, ~5% quality drop. Default
+#                          is q4_K_M.
+#   WILAI_OLLAMA_NATIVE=1  compile Ollama from source with -march=native
+#                          so llama.cpp picks up THIS CPU's SIMD
+#                          extensions (AVX2/AVX-512/AVX-VNNI/AMX).
+#                          +10-30% speed on modern CPUs. Install takes
+#                          ~15 min extra; the binary is pinned to this
+#                          host's CPU and must not be copied to another.
 #
 # Other knobs:
 #   WILAI_NO_MODELS=1      skip LLM model pulls (point to a remote Ollama)
@@ -102,12 +112,31 @@ apt-get install -y -qq \
     >/dev/null
 ok "apt deps installed"
 
-# Pick the default LLM: qwen2.5:0.5b on tiny CPUs if asked, else 3b.
+# Pick the default LLM. Precedence: WILAI_SMALL_MODEL overrides base
+# choice; WILAI_QUANT picks a quantization suffix. Ollama exposes
+# quants as separate tags, e.g. qwen2.5:3b-instruct-q3_K_M.
 DEFAULT_MODEL="qwen2.5:3b"
 if [ "${WILAI_SMALL_MODEL:-0}" = 1 ]; then
     DEFAULT_MODEL="qwen2.5:0.5b"
     say "WILAI_SMALL_MODEL=1 — using $DEFAULT_MODEL (fast, lower quality)."
 fi
+case "${WILAI_QUANT:-}" in
+    q3)
+        # qwen2.5:3b-instruct-q3_K_M = ~1.7 GB, ~25% faster than default
+        # q4, slight quality drop. Only wired for the 3b/0.5b default
+        # chain for now (same base model, different quant tag).
+        if [ "$DEFAULT_MODEL" = "qwen2.5:3b" ]; then
+            DEFAULT_MODEL="qwen2.5:3b-instruct-q3_K_M"
+        elif [ "$DEFAULT_MODEL" = "qwen2.5:0.5b" ]; then
+            DEFAULT_MODEL="qwen2.5:0.5b-instruct-q3_K_M"
+        fi
+        say "WILAI_QUANT=q3 — using $DEFAULT_MODEL (+25% speed, -5% quality)."
+        ;;
+    q4|"") : ;;  # default
+    *)
+        warn "WILAI_QUANT='$WILAI_QUANT' not recognized (q3 or q4); ignoring."
+        ;;
+esac
 
 #─── 2. Ollama (local LLM runtime) ───────────────────────────────
 if [ -n "${WILAI_REMOTE_OLLAMA:-}" ]; then
@@ -119,6 +148,60 @@ if [ -n "${WILAI_REMOTE_OLLAMA:-}" ]; then
     ok "remote Ollama reachable"
 elif command -v ollama >/dev/null 2>&1; then
     ok "ollama already present ($(ollama --version 2>&1 | head -1))"
+elif [ "${WILAI_OLLAMA_NATIVE:-0}" = 1 ]; then
+    # Compile Ollama from source with -march=native so the bundled
+    # llama.cpp picks up every SIMD extension THIS CPU exposes
+    # (AVX2, AVX-512, AVX-VNNI, AMX). +10-30% inference speed on
+    # modern CPUs. Takes ~10-15 min extra at install, needs Go 1.21+
+    # and cmake + a C++ toolchain. Binary is pinned to this CPU
+    # micro-architecture — don't copy it to a different host.
+    say "WILAI_OLLAMA_NATIVE=1 — compiling Ollama from source with -march=native..."
+    apt-get install -y -qq golang-go cmake build-essential git >/dev/null
+    tmp=$(mktemp -d)
+    git clone --depth 1 https://github.com/ollama/ollama.git "$tmp" >/dev/null 2>&1
+    (
+        cd "$tmp"
+        export CMAKE_C_FLAGS="-march=native -O3"
+        export CMAKE_CXX_FLAGS="-march=native -O3"
+        go generate ./... >/dev/null 2>&1 || true
+        go build -o ollama . >/dev/null
+    )
+    install -m 0755 "$tmp/ollama" /usr/local/bin/ollama
+    rm -rf "$tmp"
+    # systemd unit — same shape as the upstream installer's one.
+    if ! id ollama >/dev/null 2>&1; then
+        useradd -r -s /bin/false -U -d /usr/share/ollama ollama || true
+    fi
+    install -d -o ollama -g ollama /usr/share/ollama
+    cat > /etc/systemd/system/ollama.service <<'EOF'
+[Unit]
+Description=Ollama (native build via WILAI_OLLAMA_NATIVE=1)
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ollama
+Group=ollama
+Restart=always
+Environment="HOME=/usr/share/ollama"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now ollama >/dev/null 2>&1 || true
+    ollama_up=0
+    for _ in $(seq 1 30); do
+        if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+            ollama_up=1; break
+        fi
+        sleep 1
+    done
+    if [ "$ollama_up" = 1 ]; then
+        ok "ollama (native build) running"
+    else
+        die "ollama compiled but not answering on 127.0.0.1:11434 — try: sudo systemctl status ollama"
+    fi
 else
     say "Installing Ollama (local LLM runtime)..."
     curl -fsSL https://ollama.com/install.sh | sh >/dev/null 2>&1 || true
