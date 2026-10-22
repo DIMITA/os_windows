@@ -189,18 +189,7 @@ say "Installing Wilai..."
 apt-get install -y -qq "$DEB" >/dev/null
 ok "wilai installed"
 
-#─── 5. Compatibility shim: shell/daemon socket path mismatch ────
-# Older daemons (shipped in v1.0.0) put the socket at
-# /run/wilai/wilai.sock; older shells look for /run/wilai.sock. The
-# fix is in the code already, but for the deb that is currently on
-# the user's machine right now, drop a symlink so the default path
-# works out of the box.
-if [ -S /run/wilai/wilai.sock ] && [ ! -e /run/wilai.sock ]; then
-    ln -sf /run/wilai/wilai.sock /run/wilai.sock
-    chmod 0660 /run/wilai/wilai.sock 2>/dev/null || true
-fi
-
-#─── 5b. Seed default config if none exists (v1.0.0 .deb bug) ────
+#─── 5. Seed default config if none exists (v1.0.0 .deb bug) ────
 # The v1.0.0 .deb postinst did not create /etc/wilai/config.toml,
 # so the daemon tripped on empty defaults — prompts went nowhere.
 # Fixed in the next release's postinst; back-fill it here for
@@ -309,9 +298,32 @@ fi
 
 #─── 8. Restart daemon so it picks up any config change ──────────
 systemctl restart wilai-daemon.service || true
-sleep 1
 
-#─── 9. Verify the daemon is live ────────────────────────────────
+#─── 9. Wait for the socket, then compat-symlink + chmod ─────────
+# Must run AFTER the daemon restart. The daemon creates
+# /run/wilai/wilai.sock on bind; both v1.0.0 and current shells
+# look at it, but older shells also look at /run/wilai.sock, and
+# the v1.0.0 daemon bound the socket 0600 which locked the group
+# out. Belt + braces: wait up to 10s for the socket, drop the
+# compat symlink, and reopen group perms.
+say "Waiting for daemon socket..."
+sock_up=0
+for _ in $(seq 1 20); do
+    if [ -S /run/wilai/wilai.sock ]; then
+        sock_up=1; break
+    fi
+    sleep 0.5
+done
+
+if [ "$sock_up" = 1 ]; then
+    chmod 0660 /run/wilai/wilai.sock 2>/dev/null || true
+    [ -e /run/wilai.sock ] || ln -sf /run/wilai/wilai.sock /run/wilai.sock
+    ok "socket at /run/wilai/wilai.sock (perms 0660, symlinked to /run/wilai.sock)"
+else
+    warn "/run/wilai/wilai.sock did not appear in 10s — see: sudo journalctl -u wilai-daemon"
+fi
+
+#─── 10. Verify the daemon is live ───────────────────────────────
 say "Verifying daemon..."
 for _ in $(seq 1 10); do
     if systemctl is-active --quiet wilai-daemon.service; then
