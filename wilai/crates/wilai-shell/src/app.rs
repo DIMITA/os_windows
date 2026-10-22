@@ -51,6 +51,12 @@ pub struct App {
     pub quit: bool,
     pub max_log_lines: usize,
     pub scroll: u16,
+    /// Timestamp of the current turn's first token (set when busy
+    /// flips true, cleared on TurnDone). Used to compute tok/s.
+    pub turn_started_at: Option<std::time::Instant>,
+    /// Number of streamed TextChunk deltas received in the current
+    /// turn. Reset at turn start.
+    pub turn_chunk_count: u32,
     /// Voice I/O enabled at CLI/config time.
     pub voice_enabled: bool,
     /// STT engines + model are present on disk.
@@ -84,6 +90,8 @@ impl App {
             quit: false,
             max_log_lines: 1000,
             scroll: 0,
+            turn_started_at: None,
+            turn_chunk_count: 0,
             voice_enabled: false,
             voice_can_listen: false,
             voice_can_speak: false,
@@ -159,6 +167,7 @@ impl App {
     /// ServerEvent::TextChunk — each token delta extends the live
     /// assistant message as it's being generated.
     pub fn append_wilai_chunk(&mut self, delta: &str) {
+        self.turn_chunk_count = self.turn_chunk_count.saturating_add(1);
         if let Some(last) = self.log.back_mut() {
             if matches!(last.who, Who::Wilai) {
                 last.text.push_str(delta);
@@ -166,6 +175,35 @@ impl App {
             }
         }
         self.push(Who::Wilai, delta.to_string());
+    }
+
+    /// A one-line status like "Loading model…", "Thinking…",
+    /// "Generating 12 ch/s", or an empty string when idle. Rendered
+    /// by ui::draw as a subtle hint under the face.
+    pub fn busy_status(&self) -> String {
+        if !self.busy {
+            return String::new();
+        }
+        let elapsed = self
+            .turn_started_at
+            .map(|t| t.elapsed().as_secs_f32())
+            .unwrap_or(0.0);
+        if self.turn_chunk_count == 0 {
+            // No tokens yet — the daemon is either loading the model
+            // (first prompt after a cold boot) or waiting on tool work.
+            if elapsed < 1.0 {
+                "Thinking…".to_string()
+            } else if elapsed < 8.0 {
+                format!("Thinking… {:.0}s", elapsed)
+            } else {
+                format!("Loading model… {:.0}s", elapsed)
+            }
+        } else if elapsed > 0.0 {
+            let chps = (self.turn_chunk_count as f32) / elapsed;
+            format!("Generating {:.0} ch/s", chps)
+        } else {
+            format!("Generating ({} chunks)", self.turn_chunk_count)
+        }
     }
 
     pub fn set_face(&mut self, s: FaceState) {

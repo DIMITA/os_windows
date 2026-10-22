@@ -659,6 +659,8 @@ fn handle_key(app: &mut App, k: KeyEvent) -> Option<KeyAction> {
             app.push(Who::You, text.clone());
             app.set_face(FaceState::Thinking);
             app.busy = true;
+            app.turn_started_at = Some(std::time::Instant::now());
+            app.turn_chunk_count = 0;
             Some(KeyAction::SendPrompt(text))
         }
         (KeyCode::Backspace, _) => {
@@ -952,6 +954,9 @@ fn handle_server_event(app: &mut App, ev: ServerEvent) {
         ServerEvent::TextChunk { delta } => {
             app.append_wilai_chunk(&delta);
             app.set_face(FaceState::Speaking);
+            if app.turn_started_at.is_none() {
+                app.turn_started_at = Some(std::time::Instant::now());
+            }
         }
         ServerEvent::ToolCall { name, args } => {
             app.push(Who::Tool, format!("→ {name} {args}"));
@@ -976,6 +981,8 @@ fn handle_server_event(app: &mut App, ev: ServerEvent) {
         ServerEvent::TurnDone => {
             app.busy = false;
             app.set_face(FaceState::Idle);
+            app.turn_started_at = None;
+            app.turn_chunk_count = 0;
         }
         ServerEvent::Error { message } => {
             app.push(Who::System, format!("error: {message}"));

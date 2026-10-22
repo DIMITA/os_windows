@@ -31,9 +31,18 @@ pub fn draw(f: &mut Frame<'_>, app: &App) {
 
 fn draw_status(f: &mut Frame<'_>, app: &App, area: Rect) {
     let sess = app.session.as_deref().unwrap_or("—");
-    let left = format!(" Wilai · local · {} · session={} ", app.mode, sess);
+    // Spinner frames keyed off `tick` so the status actually looks
+    // alive during long generations.
+    const SPIN: &[char] = &['⠋','⠙','⠹','⠸','⠼','⠴','⠦','⠧','⠇','⠏'];
+    let busy_text = app.busy_status();
+    let left = if busy_text.is_empty() {
+        format!(" Wilai · local · {} · session={} ", app.mode, sess)
+    } else {
+        let frame = SPIN[(app.tick as usize) % SPIN.len()];
+        format!(" {frame} {busy_text} · {} · session={} ", app.mode, sess)
+    };
     let right = format!(" {} ", app.status_right);
-    let gap = area.width.saturating_sub(left.len() as u16 + right.len() as u16);
+    let gap = area.width.saturating_sub(left.chars().count() as u16 + right.chars().count() as u16);
     let line = format!("{left}{}{right}", " ".repeat(gap as usize));
     let p = Paragraph::new(line).style(
         Style::default()
