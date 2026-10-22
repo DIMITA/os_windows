@@ -80,11 +80,25 @@ $ps1Src = Join-Path $Here 'wilai.ps1'
 
 if (Test-Path $exeSrc) {
     Write-Step "installing native wilai.exe"
-    Copy-Item -Force $exeSrc (Join-Path $InstallTo 'wilai.exe')
+    $exeDst = Join-Path $InstallTo 'wilai.exe'
+    Copy-Item -Force $exeSrc $exeDst
+    # Strip the Zone.Identifier (Mark-of-the-Web) that Windows attaches
+    # to anything downloaded. Without this, double-click or the first
+    # `wilai` call shows "SmartScreen a empêché le démarrage d'une
+    # application non reconnue" and the user has to click through
+    # "More info → Run anyway". Unblocking here is per-user and only
+    # affects this specific file we just copied — same semantics as
+    # right-click → Properties → Unblock in Explorer.
+    try { Unblock-File -LiteralPath $exeDst -ErrorAction Stop } catch { }
     # Keep .ps1 beside it for debugging/fallback, don't require it.
     if (Test-Path $ps1Src) {
         Copy-Item -Force $ps1Src (Join-Path $InstallTo 'wilai.ps1')
     }
+    Write-Host ""
+    Write-Host "Note: wilai.exe is not Authenticode-signed (open-source" -ForegroundColor Yellow
+    Write-Host "project without a code-signing cert yet). If SmartScreen" -ForegroundColor Yellow
+    Write-Host "ever warns you again, click 'More info' → 'Run anyway'." -ForegroundColor Yellow
+    Write-Host ""
 } elseif (Test-Path $ps1Src) {
     Write-Step "installing PowerShell launcher (no wilai.exe found)"
     Copy-Item -Force $ps1Src (Join-Path $InstallTo 'wilai.ps1')

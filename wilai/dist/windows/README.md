@@ -165,3 +165,38 @@ INSTALL.md § SSH drop-shell.
 **The TUI looks mangled** — use Windows Terminal (`wt.exe`),
 not the legacy conhost. Set the font to something monospaced that
 has box-drawing glyphs (Cascadia Code, JetBrains Mono).
+
+**"Microsoft Defender SmartScreen a empêché le démarrage"** —
+`wilai.exe` isn't Authenticode-signed (open-source project, no
+code-signing cert yet). SmartScreen flags any downloaded, unsigned
+binary until it has built up enough download reputation.
+
+To run it anyway:
+
+1. In the SmartScreen popup, click **"More info"** (or
+   **"Informations complémentaires"** in French).
+2. Click the **"Run anyway"** (**"Exécuter quand même"**) button
+   that appears at the bottom.
+3. Windows remembers your choice for that exact `.exe` — the
+   warning won't come back for this file.
+
+Prefer the command line? From PowerShell:
+
+```powershell
+Unblock-File -Path "$env:LOCALAPPDATA\Programs\wilai\wilai.exe"
+```
+
+That strips the Mark-of-the-Web zone identifier (same as
+right-click → Properties → Unblock). `install.ps1` runs this
+automatically on the copied .exe since v1.1.1, so a fresh install
+should not surface the warning any more. If you grabbed the raw
+`wilai.exe` from the release zip and launched it in place, run
+`Unblock-File` on it yourself.
+
+Why the warning exists at all: SmartScreen trusts binaries that
+are either (a) signed with an Authenticode cert tied to a known
+publisher, or (b) widely downloaded by other users. New open-source
+releases hit neither until enough people run them. A signed EV cert
+costs $300-500/year — on the roadmap once Wilai has a reason to
+pay for it; until then, this one-time click-through is the honest
+answer.
