@@ -14,6 +14,7 @@ inputs:
   pattern:
     type: string
     required: false
+    default: "*"
     pattern: "^[a-zA-Z0-9@._*?\\-]*$"
     description: >
       Optional SHELL GLOB (not regex) to filter by unit name. Use "*"
